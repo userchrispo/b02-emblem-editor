@@ -16,9 +16,12 @@
       <p class="tagline">Copy another player's Black Ops II emblem onto your own account</p>
     </div>
   </div>
-  <div class="setup-box" id="setupBox">
-    <span class="setup-label">PS5 proxy setting</span>
-    <span class="setup-value" id="setupValue">detecting…</span>
+  <div class="topbar-right">
+    <div class="setup-box" id="setupBox">
+      <span class="setup-label">PS5 proxy setting</span>
+      <span class="setup-value" id="setupValue">detecting…</span>
+    </div>
+    <a class="btn btn-ghost" href="/editor.html">Emblem editor</a>
   </div>
 </header>
 
@@ -52,11 +55,14 @@
 
   <section class="card">
     <div class="section-head">
-      <h2>Your captured emblems</h2>
-      <button class="btn btn-ghost btn-small" id="refreshBtn">Refresh</button>
+      <h2>Your emblems</h2>
+      <div class="section-actions">
+        <a class="btn btn-ghost btn-small" href="/editor.html">New emblem</a>
+        <button class="btn btn-ghost btn-small" id="refreshBtn">Refresh</button>
+      </div>
     </div>
-    <p class="muted">Click one to select it. Once you switch to <strong>Show</strong> and open your own emblem editor, this is the emblem that loads there, ready to save as your own.</p>
-    <p class="muted" id="emblemsEmpty">No emblems captured yet. Switch to <strong>Capture</strong> mode, then open a player's profile on your PS5.</p>
+    <p class="muted">Click one to select it for <strong>Show</strong>. Open the <a href="/editor.html">emblem editor</a> to build one from scratch, or click Edit on a card.</p>
+    <p class="muted" id="emblemsEmpty">No emblems yet. Switch to <strong>Capture</strong> and open a player's profile, or <a href="/editor.html">build one in the editor</a>.</p>
     <div class="emblem-list" id="emblemList"></div>
   </section>
 
@@ -76,6 +82,7 @@
     <div class="thumb-frame"><img class="emblem-thumb" alt="emblem"></div>
     <input class="emblem-label-input" placeholder="Unnamed emblem">
     <span class="emblem-date"></span>
+    <button class="btn btn-ghost btn-small emblem-edit" type="button">Edit</button>
   </div>
 </template>
 

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emblem editor — BO2 Emblem Toolkit</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/editor.css">
+</head>
+<body class="editor-page">
+
+<header class="editor-topbar">
+  <a class="back-link" href="/">← Control panel</a>
+  <div class="brand editor-brand">
+    <div class="brand-badge">◆</div>
+    <div>
+      <h1>Emblem editor</h1>
+      <p class="tagline" id="statusLine">New emblem · 0 / 32 layers</p>
+    </div>
+  </div>
+  <label class="title-field">
+    <span>Name</span>
+    <input id="emblemName" type="text" maxlength="80" placeholder="Untitled emblem" autocomplete="off">
+  </label>
+  <div class="editor-actions">
+    <button class="btn btn-ghost" id="newBtn" type="button">New</button>
+    <button class="btn btn-ghost" id="openBtn" type="button">Open</button>
+    <button class="btn btn-ghost" id="downloadBtn" type="button">Download .bin</button>
+    <button class="btn btn-ghost" id="saveBtn" type="button">Save</button>
+    <button class="btn btn-accent" id="showBtn" type="button">Use in Show</button>
+  </div>
+</header>
+
+<div class="editor-shell">
+
+  <aside class="panel palette-panel" aria-label="Shape palette">
+    <div class="panel-head">
+      <h2>Shapes</h2>
+      <span class="muted" id="shapeCount"></span>
+    </div>
+    <input id="shapeSearch" type="search" placeholder="Search shapes" aria-label="Search shapes">
+    <div class="cat-tabs" id="catTabs" role="tablist"></div>
+    <div class="shape-grid" id="shapeGrid" role="listbox" aria-label="Shape list"></div>
+  </aside>
+
+  <section class="stage" aria-label="Emblem preview">
+    <div class="stage-frame">
+      <canvas id="emblemCanvas" width="512" height="512" tabindex="0" aria-label="Emblem canvas. Drag to move the selected layer."></canvas>
+    </div>
+    <p class="stage-hint">Click a shape to add it. Drag on the canvas to move. Arrow keys nudge · Delete removes · [ ] rotate.</p>
+  </section>
+
+  <aside class="panel inspect-panel" aria-label="Layers and properties">
+    <div class="panel-head">
+      <h2>Layers</h2>
+      <span class="muted">Front at top</span>
+    </div>
+    <p class="empty-layers" id="layersEmpty">No layers yet. Pick a shape on the left.</p>
+    <ul class="layer-list" id="layerList"></ul>
+
+    <div class="inspector" id="inspector">
+      <h2>Layer</h2>
+      <p class="muted" id="inspectorEmpty">Select a layer to edit it.</p>
+      <div id="inspectorBody" hidden>
+        <label class="field">
+          <span>Color</span>
+          <input id="propColor" type="color" value="#ffffff">
+        </label>
+        <label class="field">
+          <span>Opacity <em id="propALabel">100%</em></span>
+          <input id="propA" type="range" min="0" max="100" value="100">
+        </label>
+        <label class="field">
+          <span>Width <em id="propWLabel">50%</em></span>
+          <input id="propW" type="range" min="5" max="400" value="50">
+        </label>
+        <label class="field">
+          <span>Height <em id="propHLabel">50%</em></span>
+          <input id="propH" type="range" min="5" max="400" value="50">
+        </label>
+        <label class="check">
+          <input id="propUniform" type="checkbox" checked>
+          <span>Lock aspect</span>
+        </label>
+        <label class="field">
+          <span>Rotation <em id="propRotLabel">0°</em></span>
+          <input id="propRot" type="range" min="0" max="360" value="0">
+        </label>
+        <div class="check-row">
+          <label class="check">
+            <input id="propOutline" type="checkbox">
+            <span>Outlined</span>
+          </label>
+          <label class="check">
+            <input id="propFlip" type="checkbox">
+            <span>Flipped</span>
+          </label>
+        </div>
+        <p class="muted inspector-note">Outlined is stored correctly for the game; the live canvas shows a filled preview.</p>
+        <button class="btn btn-ghost btn-small" id="deleteLayerBtn" type="button">Remove layer</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<dialog id="openDialog" class="open-dialog">
+  <div class="dialog-head">
+    <h2>Open an emblem</h2>
+    <button class="btn btn-ghost btn-small" id="closeOpenBtn" type="button">Close</button>
+  </div>
+  <p class="muted" id="openEmpty">Nothing saved yet. Capture one from the control panel, or start a new emblem.</p>
+  <div class="open-grid" id="openGrid"></div>
+</dialog>
+
+<script src="/editor.js"></script>
+</body>
+</html>

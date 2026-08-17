@@ -114,6 +114,41 @@ def list_emblems():
                 "slot": slot,
                 "label": meta.get("labels", {}).get(str(slot), ""),
                 "captured_at": meta.get("first_captured", ""),
+                "source": meta.get("source", "capture"),
             })
     emblems.sort(key=lambda e: e["captured_at"], reverse=True)
     return emblems
+
+
+def slot_path(group, slot):
+    return os.path.join(group_dir(group), f"slot_{slot}.bin")
+
+
+def write_slot_bytes(group, slot, data):
+    os.makedirs(group_dir(group), exist_ok=True)
+    with open(slot_path(group, slot), "wb") as f:
+        f.write(data)
+
+
+def save_authored_emblem(data, label, group=None, slot=0):
+    """Write an HTTP-wrapped emblem blob as a saved slot.
+
+    If `group` already exists, overwrite that slot and update its label.
+    Otherwise create a new numbered group tagged source=editor.
+    """
+    label = (label or "").strip() or "Untitled emblem"
+    with _capture_lock:
+        if group and os.path.isdir(group_dir(group)):
+            write_slot_bytes(group, slot, data)
+            set_emblem_label(group, slot, label)
+            return group, slot
+        idx = next_group_index()
+        name = f"{idx:03d}"
+        write_meta(name, {
+            "userhash": "editor",
+            "source": "editor",
+            "first_captured": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "labels": {str(slot): label},
+        })
+        write_slot_bytes(name, slot, data)
+        return name, slot

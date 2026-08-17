@@ -6,6 +6,17 @@ You capture the emblem while looking at that player's profile, then load it into
 
 Built for personal use, on your own PS5 and your own home network.
 
+## Credit
+
+This project is based on [alexkotr1/bo2-emblem-toolkit](https://github.com/alexkotr1/bo2-emblem-toolkit) by [alexkotr1](https://github.com/alexkotr1). The proxy, capture/show flow, emblem renderer, shape calibration, and original control panel are his work. This copy keeps that intact and adds a PC emblem editor on top of it.
+
+**What we added**
+
+- A desktop emblem editor in the control panel (`/editor.html`): pick shapes, drag layers, set color/size/rotation, live preview
+- A `.bin` writer so authored emblems use the same 1408-byte format as captures
+- Save into the existing emblem library, **Use in Show** to arm the proxy, and **Download .bin** for the file itself
+- Open a captured emblem in the editor (saving a capture creates a new copy; the original is left alone)
+
 ## How it works
 
 Black Ops II fetches emblem data over plain HTTP from Treyarch's old Demonware servers. This tool runs a small proxy on your PC, and you point your PS5's network settings at it. Only that one emblem-storage endpoint is touched:
@@ -44,6 +55,8 @@ python run.py
 
 Your browser opens to the control panel on its own. On Windows you can also just double-click `start.bat`.
 
+To build an emblem on your PC instead of in-game, open **Emblem editor** from the control panel (`http://localhost:8090/editor.html`). Save, then use Show mode as usual.
+
 ## Requirements
 
 - The exe: Windows only, nothing else needed
@@ -61,6 +74,7 @@ emblemtool/
   proxy.py        the proxy server
   shapes/         the calibrated shape data and the emblem renderer
   web/            the control panel: API plus static frontend
+                  (includes the PC emblem editor at /editor.html)
 run.py            starts everything
 ```
 
@@ -72,7 +86,7 @@ Issues and pull requests are welcome.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). You can use, modify, and redistribute this however you like, as long as the copyright notice stays in and alexkotr1 is credited as the original author.
+MIT, see [LICENSE](LICENSE). You can use, modify, and redistribute this however you like, as long as the copyright notice stays in and [alexkotr1](https://github.com/alexkotr1) is credited as the original author.
 
 ## A note on scope
 

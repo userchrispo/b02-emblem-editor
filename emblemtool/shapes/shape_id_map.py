@@ -210,3 +210,16 @@ known_ids[255] = "emblems/Hard to Kill"
 known_ids[256] = "emblems/Invincible"
 known_ids[257] = "emblems/Elite Member"
 known_ids[258] = "emblems/Elite Founder"
+
+
+def list_shapes():
+    """All calibrated shapes as {id, category, name} for the editor palette."""
+    items = []
+    for sid, label in sorted(known_ids.items()):
+        category, name = label.split("/", 1)
+        items.append({
+            "id": sid,
+            "category": category,
+            "name": name.strip() or name,
+        })
+    return items

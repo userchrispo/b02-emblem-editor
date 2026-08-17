@@ -30,6 +30,21 @@ Click the text under a card to rename it to something you'll recognize later, li
 
 You can change your selection at any point, in any mode. It takes effect as soon as you're in Show mode and reopen the editor.
 
+## Building an emblem on your PC
+
+The in-game editor is slow. This toolkit includes a PC editor at
+`http://localhost:8090/editor.html` (there's a link in the control panel).
+
+1. Click **Emblem editor**, or **New emblem**.
+2. Click shapes on the left to add layers (32 max, same as the game). Drag on the canvas to move them. Use the right-hand panel for color, size, rotation, outline, and flip.
+3. Drag layers in the list to change order. The top of the list is the front.
+4. **Save** keeps a copy in "Your emblems." **Use in Show** saves it, selects it, and switches the proxy to Show mode.
+5. Open your own emblem editor on the PS5 and save, same as with a captured emblem.
+
+You can also click **Edit** on any captured emblem to load it into the PC editor. Saving a capture creates a new copy; it doesn't overwrite the original. **Download .bin** exports the same file format the toolkit uses for Show mode.
+
+The live canvas is a working preview. Outlined layers look filled while you edit; the game (and the thumbnail after you save) draws the real outline.
+
 ## Two things to know before you start
 
 **The editor only checks the server once per game session.** The first time you open your emblem editor, Black Ops II caches whatever it loads and won't ask again after that, even if you pick a different emblem in the control panel. If you need to load a second or third emblem, you have to clear that cache first: either fully restart the game, or switch to Zombies and back to Multiplayer, then open the editor again. Just backing out of the editor and going back in isn't enough.

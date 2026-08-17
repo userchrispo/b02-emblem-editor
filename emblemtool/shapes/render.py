@@ -76,6 +76,113 @@ def parse_slot_file(path):
         return parse_slot_bytes(fh.read())
 
 
+def _clamp01(v):
+    return max(0.0, min(1.0, float(v)))
+
+
+def _f32(v, default=0.0):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def encode_layers(layers):
+    """Pack layer dicts (same shape as parse_slot_bytes) into a 1408-byte body.
+
+    Unused slots are written as shape 0xFFFF. Layer `index` is the slot
+    (0 = back, 31 = front). Duplicate indices: later entries win.
+    """
+    slots = [None] * NUM_LAYERS
+    for raw in layers or []:
+        try:
+            i = int(raw.get("index", 0))
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < NUM_LAYERS:
+            slots[i] = raw
+
+    out = bytearray(NUM_LAYERS * LAYER_SIZE)
+    empty = (
+        struct.pack("<H", EMPTY_SHAPE)
+        + b"\x00\x00"
+        + struct.pack("<9f", *([0.0] * 9))
+        + b"\x00\x00\x00\x00"
+    )
+    for i, raw in enumerate(slots):
+        if raw is None:
+            rec = empty
+        else:
+            try:
+                shape = int(raw.get("shape", EMPTY_SHAPE))
+            except (TypeError, ValueError):
+                shape = EMPTY_SHAPE
+            if shape < 0 or shape > 65535:
+                shape = EMPTY_SHAPE
+            rec = struct.pack("<H", shape) + b"\x00\x00"
+            rec += struct.pack(
+                "<9f",
+                _clamp01(_f32(raw.get("r"), 1.0)),
+                _clamp01(_f32(raw.get("g"), 1.0)),
+                _clamp01(_f32(raw.get("b"), 1.0)),
+                _clamp01(_f32(raw.get("a"), 1.0)),
+                _f32(raw.get("x")),
+                _f32(raw.get("y")),
+                _f32(raw.get("sx")),
+                _f32(raw.get("sy")),
+                _f32(raw.get("rot")),
+            )
+            rec += bytes([
+                1 if raw.get("outlined") else 0,
+                1 if raw.get("flipped") else 0,
+                0,
+                0,
+            ])
+        out[i * LAYER_SIZE:(i + 1) * LAYER_SIZE] = rec
+    return bytes(out)
+
+
+def wrap_slot_http(body):
+    """Wrap a 1408-byte emblem body in a minimal HTTP/1.1 200 response.
+
+    Captured files are stored as (headers + body) because that's what the
+    PS5's HTTP client consumes in Show mode. Authored emblems use the same
+    on-disk shape so select_emblem can send them unchanged.
+    """
+    headers = (
+        "HTTP/1.1 200 OK\r\n"
+        f"Content-Length: {len(body)}\r\n"
+        "Content-Type: application/octet-stream\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+    ).encode("ascii")
+    return headers + body
+
+
+def encode_slot_file_bytes(layers):
+    """HTTP-wrapped .bin bytes, same format as a captured slot_*.bin."""
+    return wrap_slot_http(encode_layers(layers))
+
+
+def compact_layers(layers):
+    """Reindex used layers 0..n-1 in back-to-front order. Max 32."""
+    used = [dict(L) for L in (layers or []) if int(L.get("shape", EMPTY_SHAPE)) != EMPTY_SHAPE]
+    used.sort(key=lambda L: int(L.get("index", 0)))
+    for i, L in enumerate(used[:NUM_LAYERS]):
+        L["index"] = i
+    return used[:NUM_LAYERS]
+
+
+def shape_png_path(shape_id):
+    """Filesystem path of a confirmed shape glyph, or None."""
+    label = known_ids.get(int(shape_id))
+    if not label:
+        return None
+    _, name = label.split("/", 1)
+    path = os.path.join(config.SHAPES_DIR, name + ".png")
+    return path if os.path.isfile(path) else None
+
+
 def _load_shape_image(shape_id):
     """Return an RGBA PIL image for a confirmed shape id, or None."""
     if shape_id in _shape_cache:
@@ -175,9 +282,12 @@ def render_png(layers, size=256, bg=(24, 24, 24, 255)):
     return canvas
 
 
-def render_file_png_bytes(path, size=256):
-    layers = parse_slot_file(path)
+def render_layers_png_bytes(layers, size=256):
     img = render_png(layers, size=size)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def render_file_png_bytes(path, size=256):
+    return render_layers_png_bytes(parse_slot_file(path), size=size)

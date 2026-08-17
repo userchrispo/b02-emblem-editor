@@ -72,6 +72,8 @@ main {
 .setup-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 .setup-value { font-size: 15px; font-weight: 700; font-family: "SF Mono", Consolas, monospace; color: var(--accent); }
 
+.topbar-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
 /* ---------- cards ---------- */
 
 .card {
@@ -83,10 +85,12 @@ main {
 
 .card h2 { margin: 0 0 14px; font-size: 15px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); }
 
-.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 12px; }
 .section-head h2 { margin: 0; }
+.section-actions { display: flex; gap: 8px; }
 
 .muted { color: var(--muted); font-size: 13px; }
+.muted a { color: var(--accent); }
 
 /* ---------- mode switcher ---------- */
 
@@ -202,6 +206,7 @@ main {
 }
 
 .emblem-date { font-size: 10.5px; color: var(--muted); }
+.emblem-edit { width: 100%; }
 
 /* ---------- buttons ---------- */
 

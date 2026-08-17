@@ -77,7 +77,14 @@ function renderEmblems() {
     card.classList.toggle("selected", isSelected(e));
 
     node.querySelector(".emblem-thumb").src = `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png`;
-    node.querySelector(".emblem-date").textContent = fmtDate(e.captured_at);
+    node.querySelector(".emblem-date").textContent =
+      (e.source === "editor" ? "Editor · " : "") + fmtDate(e.captured_at);
+
+    const editBtn = node.querySelector(".emblem-edit");
+    editBtn.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      location.href = `/editor.html?group=${encodeURIComponent(e.group)}&slot=${e.slot}`;
+    });
 
     const labelInput = node.querySelector(".emblem-label-input");
     labelInput.value = e.label || `Emblem from ${fmtDate(e.captured_at)}`;

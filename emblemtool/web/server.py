@@ -10,9 +10,13 @@ import urllib.parse
 
 from .. import config
 from ..state import read_state, write_state
-from ..storage import list_emblems, group_dir, set_emblem_label
+from ..storage import (
+    list_emblems, group_dir, set_emblem_label, slot_path, save_authored_emblem,
+    read_meta, get_emblem_label,
+)
 from ..broadcast import select_emblem, clear_selection, read_selection
 from ..shapes import render as emblem_render
+from ..shapes.shape_id_map import list_shapes
 from .netinfo import get_lan_ip
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -92,15 +96,60 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 self._json({"error": "not found"}, 404)
 
+        elif path == "/api/shapes":
+            self._json(list_shapes())
+
+        elif path.startswith("/api/shapes/") and path.endswith(".png"):
+            try:
+                shape_id = int(path.rsplit("/", 1)[1].removesuffix(".png"))
+            except ValueError:
+                self._json({"error": "not found"}, 404)
+                return
+            png_path = emblem_render.shape_png_path(shape_id)
+            if not png_path:
+                self._json({"error": "not found"}, 404)
+                return
+            with open(png_path, "rb") as f:
+                data = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+
+        elif path.startswith("/api/emblems/") and path.endswith("/layers"):
+            bits = path.split("/")
+            # /api/emblems/<group>/<slot>/layers
+            if len(bits) == 6:
+                group = urllib.parse.unquote(bits[3])
+                try:
+                    slot = int(bits[4])
+                except ValueError:
+                    self._json({"error": "not found"}, 404)
+                    return
+                bin_path = slot_path(group, slot)
+                if os.path.exists(bin_path):
+                    meta = read_meta(group) or {}
+                    self._json({
+                        "group": group,
+                        "slot": slot,
+                        "label": get_emblem_label(group, slot),
+                        "source": meta.get("source", "capture"),
+                        "layers": emblem_render.parse_slot_file(bin_path),
+                    })
+                    return
+            self._json({"error": "not found"}, 404)
+
         elif path.startswith("/api/render/"):
             bits = path.split("/")
             if len(bits) == 5:
                 group = urllib.parse.unquote(bits[3])
                 slot = bits[4].removesuffix(".png")
-                slot_path = os.path.join(group_dir(group), f"slot_{slot}.bin")
-                if os.path.exists(slot_path):
+                bin_path = os.path.join(group_dir(group), f"slot_{slot}.bin")
+                if os.path.exists(bin_path):
                     try:
-                        body = emblem_render.render_file_png_bytes(slot_path, size=220)
+                        body = emblem_render.render_file_png_bytes(bin_path, size=220)
                         self._bytes(body, "image/png")
                     except Exception as e:
                         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220">'
@@ -116,6 +165,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         else:
             self._serve_static(path.lstrip("/"))
+
+    def _prepare_layers(self, body):
+        layers = emblem_render.compact_layers(body.get("layers") or [])
+        if len(layers) > emblem_render.NUM_LAYERS:
+            return None, "too many layers"
+        return layers, None
 
     # ---------- POST ----------
 
@@ -134,12 +189,61 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/api/select":
             group, slot = body.get("group"), body.get("slot")
-            slot_path = os.path.join(group_dir(group or ""), f"slot_{slot}.bin")
-            if not group or slot is None or not os.path.exists(slot_path):
+            try:
+                slot = int(slot)
+            except (TypeError, ValueError):
                 self._json({"ok": False, "error": "not found"}, 404)
                 return
-            select_emblem(group, int(slot))
+            if not group or not os.path.exists(slot_path(group, slot)):
+                self._json({"ok": False, "error": "not found"}, 404)
+                return
+            select_emblem(group, slot)
             self._json({"ok": True})
+
+        elif path == "/api/editor/save":
+            layers, err = self._prepare_layers(body)
+            if err:
+                self._json({"ok": False, "error": err}, 400)
+                return
+            blob = emblem_render.encode_slot_file_bytes(layers)
+            group = body.get("group") or None
+            try:
+                slot = int(body.get("slot", 0))
+            except (TypeError, ValueError):
+                slot = 0
+            if group:
+                meta = read_meta(group) or {}
+                if meta.get("source") != "editor":
+                    group = None
+            name, slot = save_authored_emblem(
+                blob, body.get("label"), group=group, slot=slot,
+            )
+            if body.get("select") or body.get("show"):
+                select_emblem(name, slot)
+            if body.get("show"):
+                write_state("INJECT")
+            self._json({"ok": True, "group": name, "slot": slot, "id": f"{name}:{slot}"})
+
+        elif path == "/api/editor/export":
+            layers, err = self._prepare_layers(body)
+            if err:
+                self._json({"ok": False, "error": err}, 400)
+                return
+            blob = emblem_render.encode_slot_file_bytes(layers)
+            self._bytes(blob, "application/octet-stream")
+
+        elif path == "/api/editor/preview":
+            layers, err = self._prepare_layers(body)
+            if err:
+                self._json({"ok": False, "error": err}, 400)
+                return
+            try:
+                size = int(body.get("size") or 512)
+            except (TypeError, ValueError):
+                size = 512
+            size = max(64, min(size, 768))
+            png = emblem_render.render_layers_png_bytes(layers, size=size)
+            self._bytes(png, "image/png")
 
         elif path == "/api/deselect":
             clear_selection()

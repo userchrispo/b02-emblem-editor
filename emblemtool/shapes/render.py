@@ -173,6 +173,9 @@ def compact_layers(layers):
     return used[:NUM_LAYERS]
 
 
+_png_bytes = {}
+
+
 def shape_png_path(shape_id):
     """Filesystem path of a confirmed shape glyph, or None."""
     label = known_ids.get(int(shape_id))
@@ -181,6 +184,21 @@ def shape_png_path(shape_id):
     _, name = label.split("/", 1)
     path = os.path.join(config.SHAPES_DIR, name + ".png")
     return path if os.path.isfile(path) else None
+
+
+def shape_png_bytes(shape_id):
+    """Raw PNG bytes for a confirmed shape, cached after the first read."""
+    shape_id = int(shape_id)
+    if shape_id in _png_bytes:
+        return _png_bytes[shape_id]
+    path = shape_png_path(shape_id)
+    if not path:
+        _png_bytes[shape_id] = None
+        return None
+    with open(path, "rb") as f:
+        data = f.read()
+    _png_bytes[shape_id] = data
+    return data
 
 
 def _load_shape_image(shape_id):

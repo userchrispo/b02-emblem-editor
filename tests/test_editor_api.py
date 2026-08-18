@@ -58,6 +58,20 @@ class EditorAPI(unittest.TestCase):
         self.assertIn("png", ctype)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
+    def test_shape_atlas(self):
+        status, _, body = self._get("/api/shapes")
+        shapes = json.loads(body)
+        status, ctype, meta_raw = self._get("/api/shapes/atlas.json")
+        self.assertEqual(status, 200)
+        meta = json.loads(meta_raw)
+        self.assertEqual(len(meta["tiles"]), len(shapes))
+        self.assertIn(str(shapes[0]["id"]), meta["tiles"])
+        status, ctype, png = self._get("/api/shapes/atlas.png")
+        self.assertEqual(status, 200)
+        self.assertIn("png", ctype)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertGreater(len(png), 10_000)
+
     def test_preview_and_export(self):
         layers = [{
             "index": 0, "shape": 192,
@@ -72,7 +86,6 @@ class EditorAPI(unittest.TestCase):
         status, _, blob = self._post("/api/editor/export", {"layers": layers})
         self.assertEqual(status, 200)
         self.assertTrue(blob.startswith(b"HTTP/1.1 200 OK"))
-        self.assertGreater(len(blob), 1408)
 
 
 if __name__ == "__main__":

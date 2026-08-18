@@ -17,6 +17,10 @@ This project is based on [alexkotr1/bo2-emblem-toolkit](https://github.com/alexk
 - Save into the existing emblem library, **Use in Show** to arm the proxy, and **Download .bin** for the file itself
 - Open a captured emblem in the editor (saving a capture creates a new copy; the original is left alone)
 
+**What we removed**
+
+- **From image** — drop/paste a picture and rebuild it with 32 game shapes. It did not copy well enough, so that path is gone. Use Capture, or build by hand in the PC editor.
+
 ## How it works
 
 Black Ops II fetches emblem data over plain HTTP from Treyarch's old Demonware servers. This tool runs a small proxy on your PC, and you point your PS5's network settings at it. Only that one emblem-storage endpoint is touched:
@@ -33,11 +37,11 @@ Everything else, including PSN sign-in and matchmaking, passes through the proxy
 3. In the control panel, click the captured emblem to select it.
 4. Turn on show mode.
 5. Open your own emblem editor on the PS5. The captured emblem loads in place of whatever you'd normally see there.
-6. Save it, same as you would with anything you made yourself.
+6. **Save it in the game**, the same way you would with anything you made yourself. Seeing it on your player card while the proxy is on is only a preview. If you disconnect without that in-game save, it will be gone.
 
 Two things worth knowing before you try this:
 
-- The game only checks for a new emblem once per session. After you open the editor the first time, it caches what it loaded and won't ask again, even if you pick a different capture afterward. To load a different one, restart the game, or switch to Zombies and back to Multiplayer, before opening the editor again.
+- The game only checks for a new emblem once per session. After you open the editor the first time, it caches what it loaded and won't ask again, even if you pick a different capture afterward. To copy a second emblem, save the first one in-game, then restart the game (or switch to Zombies and back to Multiplayer), select the next card, and save it to a **different** slot.
 - It won't work if the emblem uses a shape you haven't unlocked on your own account. Black Ops II checks that itself, and there's nothing the proxy can do about it.
 
 See [docs/USAGE.md](docs/USAGE.md) for the full walkthrough and [docs/INSTALL.md](docs/INSTALL.md) for setup.
@@ -55,7 +59,7 @@ python run.py
 
 Your browser opens to the control panel on its own. On Windows you can also just double-click `start.bat`.
 
-To build an emblem on your PC instead of in-game, open **Emblem editor** from the control panel (`http://localhost:8090/editor.html`). Save, then use Show mode as usual.
+To build an emblem on your PC instead of in-game, open **Emblem editor** from the control panel (`http://localhost:8090/editor.html`). Pick shapes, edit layers by hand, save, then use Show mode and **save again in the in-game editor**. There is no From image / rebuild-from-picture step.
 
 ## Requirements
 

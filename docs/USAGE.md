@@ -8,7 +8,7 @@ This assumes you've already finished the one-time [install](INSTALL.md) and have
 |---|---|
 | Off | Normal internet. Nothing is captured or changed. |
 | Capture | Saves the emblem of any player whose profile or channel you open. |
-| Show | Loads your selected emblem into your own emblem editor. |
+| Show | Serves your selected emblem to the PS5 *while the proxy is on*. That is a preview until you save it in the in-game editor. |
 
 Only one mode runs at a time.
 
@@ -16,30 +16,50 @@ Only one mode runs at a time.
 
 1. Click Capture.
 2. On your PS5, open the profile or channel of the player you want to copy from.
-3. Their emblem shows up under "Your captured emblems" within a few seconds. Nothing else to do.
+3. Their emblem shows up under **Your emblems** within a few seconds. Nothing else to do.
 4. A player can have more than one saved emblem. If so, each one shows up as its own card.
 
 Click the text under a card to rename it to something you'll recognize later, like "Sam's dragon emblem," instead of the default.
 
+The toolkit can keep many captured emblems on your PC. Show mode only sends **one** of them to the console at a time (the card with the checkmark).
+
 ## Copying an emblem onto your own account
 
-1. Click the emblem card you want. A checkmark shows which one is selected. Only one can be selected at a time.
-2. Click Show.
-3. Open your own emblem editor on the PS5, not another player's profile. The captured emblem loads there instead of your usual saved emblem.
-4. Save it from the editor, the same way you'd save anything you built yourself. It's now permanently on your account.
+Seeing it on your player card is **not** the same as owning it. While Show is on, the proxy can paint that emblem onto your card and into the editor. The moment you disconnect the proxy or switch to Off, the console goes back to whatever is actually stored on your account. If you never saved in the in-game editor, it will be gone.
 
-You can change your selection at any point, in any mode. It takes effect as soon as you're in Show mode and reopen the editor.
+1. Click the emblem card you want. A checkmark shows which one is selected.
+2. Click **Show**.
+3. On the PS5, open **your own** emblem editor, not another player's profile.
+4. Pick the slot you want this copy to live in (an empty slot, or one you are fine overwriting).
+5. **Save in the game**, the same way you save an emblem you painted yourself. That upload is what writes it to your account.
+6. To prove it stuck: switch the toolkit to **Off** (or take the proxy off the PS5) and look at that slot / your player card again. If it is still there, it is yours.
+
+## Copying a second (or third) emblem
+
+Black Ops II only fetches emblem data **once per game session**. After you open the editor the first time, it keeps that result. Selecting a different card in the control panel will not change what the console already cached. Backing out of the editor and going back in is not enough.
+
+Do this for each extra copy:
+
+1. Finish saving the previous emblem in-game first (step 5 above).
+2. Restart Black Ops II, **or** switch to Zombies and back to Multiplayer, so the editor cache clears.
+3. In the control panel, click the next emblem, then **Show**.
+4. Open your emblem editor again, pick a **different** slot from the one you already saved, and save.
+5. Repeat from step 2 if you want another one.
+
+If you skip the restart/mode switch, the second copy never loads and it will look like “the other one is gone.” If you save again into the same slot, you overwrite the first copy on your account.
 
 ## Building an emblem on your PC
 
 The in-game editor is slow. This toolkit includes a PC editor at
 `http://localhost:8090/editor.html` (there's a link in the control panel).
 
+There is **no From image**. Dropping a picture and rebuilding it with 32 shapes was removed because the result was not a usable copy.
+
 1. Click **Emblem editor**, or **New emblem**.
-2. Click shapes on the left to add layers (32 max, same as the game). Drag on the canvas to move them. Use the right-hand panel for color, size, rotation, outline, and flip.
+2. Click shapes on the left to add layers. Drag on the canvas to move them. Use the right-hand panel for color, size, rotation, outline, and flip.
 3. Drag layers in the list to change order. The top of the list is the front.
-4. **Save** keeps a copy in "Your emblems." **Use in Show** saves it, selects it, and switches the proxy to Show mode.
-5. Open your own emblem editor on the PS5 and save, same as with a captured emblem.
+4. **Save** keeps a copy in "Your emblems" on the PC. **Use in Show** saves it, selects it, and switches the proxy to Show mode.
+5. Open your own emblem editor on the PS5 and **save in the game**, same as with a captured emblem. Until you do that, it will vanish when you leave the proxy.
 
 You can also click **Edit** on any captured emblem to load it into the PC editor. Saving a capture creates a new copy; it doesn't overwrite the original. **Download .bin** exports the same file format the toolkit uses for Show mode.
 
@@ -61,6 +81,12 @@ No. Only the plain-HTTP emblem-storage requests are touched. Everything else, in
 
 **Can I run this for more than one PS5?**
 Yes. The proxy setting is per-console, so any number of PS5s on your network can point at the same running toolkit.
+
+**I copied one emblem, then tried another and the new one never showed / the first one vanished.**
+The game still has the first load cached, so it never asked the proxy for the second emblem. Save the first one in the in-game editor, restart the game (or Zombies → Multiplayer), select the second card, turn Show on, open the editor, and save it to a **different** slot.
+
+**I disconnected from the proxy and the emblem left my account. It only stayed on my player card while I was connected.**
+Show mode was only *displaying* it. The player card can show the injected emblem for as long as the PS5 is using the proxy. It is not written to your account until you open **your** emblem editor and save. After that, turn the toolkit Off and check again — that is the real test.
 
 **I switched back to Off but I still see the captured emblem somewhere. Why?**
 That's the PS5's own local cache still showing what it last loaded, not something the toolkit is still doing. Switching modes only changes what the proxy would serve on the next request, it doesn't force the console to ask again.

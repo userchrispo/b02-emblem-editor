@@ -11,12 +11,14 @@ import urllib.parse
 from .. import config
 from ..state import read_state, write_state
 from ..storage import (
-    list_emblems, group_dir, set_emblem_label, slot_path, save_authored_emblem,
+    list_emblems, set_emblem_label, slot_path, save_authored_emblem,
     read_meta, get_emblem_label,
 )
 from ..broadcast import select_emblem, clear_selection, read_selection
 from ..shapes import render as emblem_render
+from ..shapes.atlas import get_shape_atlas, warm_atlas
 from ..shapes.shape_id_map import list_shapes
+from ..thumbs import THUMB_SIZE, cached_thumb_png, thumb_etag
 from .netinfo import get_lan_ip
 
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -39,10 +41,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _bytes(self, data, content_type, code=200):
+    def _bytes(self, data, content_type, code=200, extra_headers=None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -99,18 +104,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/shapes":
             self._json(list_shapes())
 
+        elif path == "/api/shapes/atlas.json":
+            _, meta = get_shape_atlas()
+            self.send_response(200)
+            body = json.dumps(meta).encode()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+
+        elif path == "/api/shapes/atlas.png":
+            data, _ = get_shape_atlas()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(data)
+
         elif path.startswith("/api/shapes/") and path.endswith(".png"):
             try:
                 shape_id = int(path.rsplit("/", 1)[1].removesuffix(".png"))
             except ValueError:
                 self._json({"error": "not found"}, 404)
                 return
-            png_path = emblem_render.shape_png_path(shape_id)
-            if not png_path:
+            data = emblem_render.shape_png_bytes(shape_id)
+            if not data:
                 self._json({"error": "not found"}, 404)
                 return
-            with open(png_path, "rb") as f:
-                data = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(data)))
@@ -145,12 +167,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             bits = path.split("/")
             if len(bits) == 5:
                 group = urllib.parse.unquote(bits[3])
-                slot = bits[4].removesuffix(".png")
-                bin_path = os.path.join(group_dir(group), f"slot_{slot}.bin")
+                slot_name = bits[4].split("?", 1)[0].removesuffix(".png")
+                try:
+                    slot = int(slot_name)
+                except ValueError:
+                    self._json({"error": "not found"}, 404)
+                    return
+                bin_path = slot_path(group, slot)
                 if os.path.exists(bin_path):
                     try:
-                        body = emblem_render.render_file_png_bytes(bin_path, size=220)
-                        self._bytes(body, "image/png")
+                        etag = thumb_etag(group, slot, THUMB_SIZE)
+                        if self.headers.get("If-None-Match") == etag:
+                            self.send_response(304)
+                            self.send_header("ETag", etag)
+                            self.send_header("Cache-Control", "private, max-age=3600")
+                            self.end_headers()
+                            return
+                        body = cached_thumb_png(group, slot, THUMB_SIZE)
+                        self._bytes(body, "image/png", extra_headers={
+                            "ETag": etag,
+                            "Cache-Control": "private, max-age=3600",
+                        })
                     except Exception as e:
                         svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220">'
                                f'<rect width="100%" height="100%" fill="#1a1a1a"/>'
@@ -176,6 +213,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > 1024 * 1024:
+            remaining = length
+            while remaining > 0:
+                chunk = self.rfile.read(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+            self._json({"ok": False, "error": "Request is too large"}, 413)
+            return
         body = self._read_json_body()
 
         if path == "/api/mode":
@@ -267,4 +314,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def make_server(host=None, port=None):
     host = host or config.WEB_HOST
     port = port or config.WEB_PORT
+    warm_atlas()
     return http.server.ThreadingHTTPServer((host, port), Handler)

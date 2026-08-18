@@ -166,7 +166,8 @@ html, body.editor-page {
   border-color: var(--accent);
   outline: none;
 }
-.shape-cell img {
+.shape-cell img,
+.shape-cell canvas {
   width: 100%;
   height: 100%;
   object-fit: contain;

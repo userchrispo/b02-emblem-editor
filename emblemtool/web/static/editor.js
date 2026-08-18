@@ -22,8 +22,11 @@ const state = {
   dragging: null,
 };
 
-const shapeImgs = new Map();
+const tintCache = new Map();
+const ALPHA_MIN = 12;
 const $ = (id) => document.getElementById(id);
+
+let atlas = null;
 
 async function getJSON(url) {
   const r = await fetch(url);
@@ -62,9 +65,25 @@ function shapeName(id) {
   return s ? s.name : `Shape ${id}`;
 }
 
-function markDirty() {
+function markDirty(opts) {
   state.dirty = true;
-  renderAll();
+  if (opts && opts.layers) {
+    renderLayers();
+  } else {
+    updateSelectedSwatch();
+  }
+  renderInspector();
+  setStatus();
+  drawCanvas();
+}
+
+function updateSelectedSwatch() {
+  const L = state.layers[state.selected];
+  const li = document.querySelector(`.layer-item[data-index="${state.selected}"]`);
+  if (!L || !li) return;
+  li.querySelector(".layer-swatch").style.background = rgbHex(L);
+  const name = shapeName(L.shape) + (L.outlined ? " · outline" : "");
+  li.querySelector(".layer-name").textContent = name;
 }
 
 function setStatus() {
@@ -75,45 +94,54 @@ function setStatus() {
   $("statusLine").textContent = bits.join(" · ");
 }
 
-function loadShapeImage(id) {
-  if (shapeImgs.has(id)) return shapeImgs.get(id);
-  const p = new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => resolve(null);
-    img.src = `/api/shapes/${id}.png`;
-  });
-  shapeImgs.set(id, p);
-  return p;
+function atlasTile(shapeId) {
+  return atlas && atlas.tiles[String(shapeId)];
 }
 
-function tintGlyph(img, L) {
+function tintedGlyph(L) {
+  const tile = atlasTile(L.shape);
+  if (!atlas || !tile) return null;
+  const key = `${L.shape}|${Math.round(L.r * 255)}|${Math.round(L.g * 255)}|${Math.round(L.b * 255)}`;
+  if (tintCache.has(key)) return tintCache.get(key);
   const src = document.createElement("canvas");
-  src.width = img.width;
-  src.height = img.height;
+  src.width = atlas.cell;
+  src.height = atlas.cell;
   const sctx = src.getContext("2d");
-  sctx.drawImage(img, 0, 0);
+  sctx.drawImage(atlas.img, tile.x, tile.y, atlas.cell, atlas.cell, 0, 0, atlas.cell, atlas.cell);
   sctx.globalCompositeOperation = "multiply";
   sctx.fillStyle = `rgb(${Math.round(L.r * 255)},${Math.round(L.g * 255)},${Math.round(L.b * 255)})`;
   sctx.fillRect(0, 0, src.width, src.height);
   sctx.globalCompositeOperation = "destination-in";
-  sctx.drawImage(img, 0, 0);
+  sctx.drawImage(atlas.img, tile.x, tile.y, atlas.cell, atlas.cell, 0, 0, atlas.cell, atlas.cell);
+  if (tintCache.size > 160) tintCache.clear();
+  tintCache.set(key, src);
   return src;
 }
 
-let drawGen = 0;
+function glyphAlpha(shapeId, u, v) {
+  const tile = atlasTile(shapeId);
+  if (!atlas || !tile) return 255;
+  const cell = atlas.cell;
+  let best = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const x = Math.min(cell - 1, Math.max(0, Math.floor(u * cell) + dx));
+      const y = Math.min(cell - 1, Math.max(0, Math.floor(v * cell) + dy));
+      const i = ((tile.y + y) * atlas.width + (tile.x + x)) * 4;
+      best = Math.max(best, atlas.pixels[i + 3]);
+    }
+  }
+  return best;
+}
 
-async function drawCanvas() {
+function drawCanvas() {
   const canvas = $("emblemCanvas");
   const ctx = canvas.getContext("2d");
   const size = canvas.width;
-  const gen = ++drawGen;
   ctx.clearRect(0, 0, size, size);
 
   const ordered = [...state.layers].sort((a, b) => a.index - b.index);
   for (const L of ordered) {
-    const img = await loadShapeImage(L.shape);
-    if (gen !== drawGen) return;
     const w = Math.max(1, Math.round(Math.pow(2, L.sx) * size));
     const h = Math.max(1, Math.round(Math.pow(2, L.sy) * size));
     ctx.save();
@@ -121,8 +149,8 @@ async function drawCanvas() {
     ctx.rotate((L.rot * Math.PI) / 180);
     if (L.flipped) ctx.scale(-1, 1);
     ctx.globalAlpha = Math.max(0, Math.min(1, L.a));
-    if (img) {
-      const glyph = tintGlyph(img, L);
+    const glyph = tintedGlyph(L);
+    if (glyph) {
       ctx.drawImage(glyph, -w / 2, -h / 2, w, h);
     } else {
       ctx.fillStyle = rgbHex(L);
@@ -146,6 +174,27 @@ async function drawCanvas() {
   }
 }
 
+async function loadAtlas() {
+  const meta = await getJSON("/api/shapes/atlas.json");
+  const img = new Image();
+  const ready = new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+  });
+  img.src = meta.url || "/api/shapes/atlas.png";
+  await ready;
+  const c = document.createElement("canvas");
+  c.width = meta.width;
+  c.height = meta.height;
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+  atlas = {
+    ...meta,
+    img,
+    pixels: ctx.getImageData(0, 0, meta.width, meta.height).data,
+  };
+}
+
 function reindex() {
   state.layers.forEach((L, i) => { L.index = i; });
 }
@@ -167,7 +216,7 @@ function addLayer(shapeId) {
     flipped: false,
   });
   state.selected = state.layers.length - 1;
-  markDirty();
+  markDirty({ layers: true });
 }
 
 function removeSelected() {
@@ -175,7 +224,7 @@ function removeSelected() {
   state.layers.splice(state.selected, 1);
   reindex();
   state.selected = Math.min(state.selected, state.layers.length - 1);
-  markDirty();
+  markDirty({ layers: true });
 }
 
 function payload() {
@@ -230,10 +279,25 @@ function renderPalette() {
     btn.className = "shape-cell";
     btn.title = s.name;
     btn.setAttribute("aria-label", s.name);
-    const img = document.createElement("img");
-    img.alt = "";
-    img.src = `/api/shapes/${s.id}.png`;
-    btn.appendChild(img);
+    if (atlas) {
+      const c = document.createElement("canvas");
+      c.width = 64;
+      c.height = 64;
+      c.setAttribute("aria-hidden", "true");
+      const t = atlasTile(s.id);
+      if (t) {
+        const ctx = c.getContext("2d");
+        ctx.drawImage(atlas.img, t.x, t.y, atlas.cell, atlas.cell, 0, 0, 64, 64);
+      }
+      btn.appendChild(c);
+    } else {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.src = `/api/shapes/${s.id}.png`;
+      btn.appendChild(img);
+    }
     btn.addEventListener("click", () => addLayer(s.id));
     grid.appendChild(btn);
   }
@@ -275,7 +339,7 @@ function renderLayers() {
       state.layers.splice(to, 0, moved);
       reindex();
       state.selected = to;
-      markDirty();
+      markDirty({ layers: true });
     });
     list.appendChild(li);
   }
@@ -367,20 +431,32 @@ function canvasPos(ev) {
   };
 }
 
+function layerUV(L, x, y) {
+  const w = Math.pow(2, L.sx);
+  const h = Math.pow(2, L.sy);
+  if (w <= 0 || h <= 0) return null;
+  const dx = x - L.x;
+  const dy = y - L.y;
+  const rad = (-L.rot * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  let rx = dx * cos - dy * sin;
+  let ry = dx * sin + dy * cos;
+  if (L.flipped) rx = -rx;
+  const u = rx / w + 0.5;
+  const v = ry / h + 0.5;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return null;
+  return { u, v };
+}
+
 function hitTest(x, y) {
-  for (let i = state.layers.length - 1; i >= 0; i--) {
-    const L = state.layers[i];
-    const w = Math.pow(2, L.sx);
-    const h = Math.pow(2, L.sy);
-    let dx = x - L.x;
-    let dy = y - L.y;
-    const rad = (-L.rot * Math.PI) / 180;
-    const cos = Math.cos(rad);
-    const sin = Math.sin(rad);
-    let rx = dx * cos - dy * sin;
-    let ry = dx * sin + dy * cos;
-    if (L.flipped) rx = -rx;
-    if (Math.abs(rx) <= w / 2 && Math.abs(ry) <= h / 2) return i;
+  const order = state.layers
+    .map((L, i) => i)
+    .sort((a, b) => (state.layers[b].index - state.layers[a].index) || (b - a));
+  for (const i of order) {
+    const uv = layerUV(state.layers[i], x, y);
+    if (!uv) continue;
+    if (glyphAlpha(state.layers[i].shape, uv.u, uv.v) >= ALPHA_MIN) return i;
   }
   return -1;
 }
@@ -473,7 +549,7 @@ async function showOpenDialog() {
     btn.className = "open-card";
     const img = document.createElement("img");
     img.alt = "";
-    img.src = `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png`;
+    img.src = `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png${e.mtime ? `?v=${e.mtime}` : ""}`;
     const span = document.createElement("span");
     span.textContent = e.label || (e.source === "editor" ? "Untitled" : "Capture");
     btn.append(img, span);
@@ -542,7 +618,14 @@ async function init() {
   bindCanvas();
   bindKeys();
   bindToolbar();
-  state.shapes = await getJSON("/api/shapes");
+  $("statusLine").textContent = "Loading shapes…";
+  state.shapes = (await Promise.all([
+    getJSON("/api/shapes"),
+    loadAtlas().catch((err) => {
+      console.error(err);
+      atlas = null;
+    }),
+  ]))[0];
   if (!state.shapes.some((s) => s.category === state.category) && state.shapes[0]) {
     state.category = state.shapes[0].category;
   }

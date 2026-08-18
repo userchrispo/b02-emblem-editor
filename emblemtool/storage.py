@@ -11,6 +11,7 @@ import time
 from . import config
 
 _capture_lock = threading.Lock()
+_warm_threads = []
 
 _SLOT_RE = re.compile(r"^slot_(\d+)\.bin$")
 
@@ -108,6 +109,11 @@ def list_emblems():
     for group in list_groups():
         meta = read_meta(group) or {}
         for slot in group_slots(group):
+            path = slot_path(group, slot)
+            try:
+                mtime = int(os.path.getmtime(path))
+            except OSError:
+                mtime = 0
             emblems.append({
                 "id": f"{group}:{slot}",
                 "group": group,
@@ -115,6 +121,7 @@ def list_emblems():
                 "label": meta.get("labels", {}).get(str(slot), ""),
                 "captured_at": meta.get("first_captured", ""),
                 "source": meta.get("source", "capture"),
+                "mtime": mtime,
             })
     emblems.sort(key=lambda e: e["captured_at"], reverse=True)
     return emblems
@@ -128,6 +135,24 @@ def write_slot_bytes(group, slot, data):
     os.makedirs(group_dir(group), exist_ok=True)
     with open(slot_path(group, slot), "wb") as f:
         f.write(data)
+    thread = threading.Thread(target=_warm_thumb, args=(group, slot), daemon=True)
+    thread.start()
+    _warm_threads[:] = [t for t in _warm_threads if t.is_alive()]
+    _warm_threads.append(thread)
+
+
+def wait_warm_thumbs(timeout=5):
+    """Wait for background thumbnail renders. Tests use this before cleanup."""
+    while _warm_threads:
+        _warm_threads.pop(0).join(timeout=timeout)
+
+
+def _warm_thumb(group, slot):
+    try:
+        from .thumbs import cached_thumb_png
+        cached_thumb_png(group, slot)
+    except Exception:
+        pass
 
 
 def save_authored_emblem(data, label, group=None, slot=0):

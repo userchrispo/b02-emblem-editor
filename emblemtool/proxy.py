@@ -14,7 +14,7 @@ import time
 
 from . import config
 from .state import read_state
-from .storage import get_or_create_capture_group, group_dir
+from .storage import get_or_create_capture_group, write_slot_bytes
 from .broadcast import read_selected_data
 
 # matches ".../u51b08745d269.slot_504?..." -> userhash, slot number
@@ -114,8 +114,7 @@ def handle_target_request(client, req, host, port, path):
 
     if mode == "CAPTURE" and slot_num is not None:
         group = get_or_create_capture_group(userhash)
-        with open(os.path.join(group_dir(group), f"slot_{slot_num}.bin"), "wb") as f:
-            f.write(headers + body)
+        write_slot_bytes(group, slot_num, headers + body)
         log(f"  Captured: group {group} slot_{slot_num} ({len(body)} bytes)")
 
     client.sendall(headers + body)

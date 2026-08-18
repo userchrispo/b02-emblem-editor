@@ -22,7 +22,8 @@ class SaveAuthored(unittest.TestCase):
 
     def tearDown(self):
         config.SAVED_DIR = self._old
-        shutil.rmtree(self.tmp)
+        storage.wait_warm_thumbs()
+        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def test_creates_editor_group_and_roundtrips(self):
         layers = [{
@@ -42,6 +43,8 @@ class SaveAuthored(unittest.TestCase):
         emblems = storage.list_emblems()
         self.assertEqual(emblems[0]["source"], "editor")
         self.assertEqual(emblems[0]["label"], "Blue circle")
+        self.assertIn("mtime", emblems[0])
+        self.assertGreater(emblems[0]["mtime"], 0)
 
     def test_overwrite_keeps_group(self):
         blob = encode_slot_file_bytes([])

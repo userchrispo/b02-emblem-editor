@@ -187,7 +187,12 @@ main {
   border: 1px solid var(--border);
   overflow: hidden;
 }
-.thumb-frame img { width: 100%; height: 100%; object-fit: contain; }
+.thumb-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
 
 .emblem-label-input {
   background: transparent;

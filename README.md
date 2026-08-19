@@ -48,7 +48,7 @@ See [docs/USAGE.md](docs/USAGE.md) for the full walkthrough and [docs/INSTALL.md
 
 ## Running it
 
-On Windows, the simplest option is to download `BO2EmblemToolkit.exe` from the [Releases page](https://github.com/alexkotr1/bo2-emblem-toolkit/releases) and double-click it. Nothing else to install.
+On Windows, the simplest option is to download `BO2EmblemToolkit.exe` from this project's [Releases page](https://github.com/userchrispo/b02-emblem-editor/releases) and double-click it. Nothing else to install.
 
 To run it from source instead:
 

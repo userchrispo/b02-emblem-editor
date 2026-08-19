@@ -10,9 +10,10 @@ import urllib.parse
 
 from .. import config
 from ..state import read_state, write_state
+from ..activity import read_activity, clear_session_flag
 from ..storage import (
     list_emblems, set_emblem_label, slot_path, save_authored_emblem,
-    read_meta, get_emblem_label,
+    read_meta, get_emblem_label, delete_emblem, import_slot_bytes,
 )
 from ..broadcast import select_emblem, clear_selection, read_selection
 from ..shapes import render as emblem_render
@@ -78,9 +79,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path
 
         if path == "/api/status":
+            activity = read_activity()
             self._json({
                 "mode": _MODE_TO_PUBLIC.get(read_state(), "off"),
                 "selected": read_selection(),
+                "last_hit": activity.get("last_hit"),
+                "last_capture": activity.get("last_capture"),
+                "needs_session_reset": bool(activity.get("needs_session_reset")),
             })
 
         elif path == "/api/emblems":
@@ -234,6 +239,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             write_state(internal)
             self._json({"ok": True})
 
+        elif path == "/api/session-reset":
+            clear_session_flag()
+            self._json({"ok": True})
+
         elif path == "/api/select":
             group, slot = body.get("group"), body.get("slot")
             try:
@@ -295,6 +304,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/api/deselect":
             clear_selection()
             self._json({"ok": True})
+
+        elif path == "/api/emblems/import":
+            import base64
+            raw = body.get("data_base64") or body.get("bin_base64") or ""
+            try:
+                data = base64.b64decode(raw)
+            except (ValueError, TypeError):
+                self._json({"ok": False, "error": "That is not an emblem file"}, 400)
+                return
+            try:
+                group, slot = import_slot_bytes(data, body.get("label"))
+            except ValueError as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+                return
+            self._json({"ok": True, "group": group, "slot": slot, "id": f"{group}:{slot}"})
+
+        elif path.startswith("/api/emblems/") and path.endswith("/delete"):
+            bits = path.split("/")
+            if len(bits) == 6:
+                group = urllib.parse.unquote(bits[3])
+                try:
+                    slot = int(bits[4])
+                except (TypeError, ValueError):
+                    self._json({"ok": False, "error": "not found"}, 404)
+                    return
+                sel = read_selection()
+                if sel and sel.get("group") == group and int(sel.get("slot", -1)) == slot:
+                    clear_selection()
+                if delete_emblem(group, slot):
+                    self._json({"ok": True})
+                    return
+            self._json({"ok": False, "error": "not found"}, 404)
 
         elif path.startswith("/api/emblems/") and path.endswith("/label"):
             bits = path.split("/")

@@ -7,10 +7,14 @@ This is a one-time setup. Once it's done, day-to-day use is just
 
 If you're on Windows and don't want to deal with Python at all, grab
 `BO2EmblemToolkit.exe` from this project's
-[Releases page](https://github.com/alexkotr1/bo2-emblem-toolkit/releases).
+[Releases page](https://github.com/userchrispo/b02-emblem-editor/releases).
 It's a single file with everything already inside it. Put it in its own
 folder (it saves your captured emblems next to itself), double-click it, and
 skip ahead to [Point your PS5 at it](#point-your-ps5-at-it) below.
+
+If there is no exe on Releases yet, run `build_exe.bat` on Windows, or trigger
+the **Build exe** GitHub Action on this repo (it also runs when you push a
+`v*` tag).
 
 Windows may warn you that the file is from an unrecognized publisher, since
 it isn't signed with a paid code-signing certificate. Click "More info" then

@@ -10,8 +10,71 @@ const modeHints = {
 
 let currentStatus = null;
 let currentEmblems = [];
+let libraryQuery = "";
 let renderedKeys = "";
 let selectInFlight = null;
+
+const CAPTURE_SEQ_KEY = "emblemtool.captureSeq";
+const LIVE_FRESH_S = 90;
+
+function formatAgo(ts) {
+  if (!ts) return "";
+  const sec = Math.max(0, Math.round(Date.now() / 1000 - Number(ts)));
+  if (sec < 5) return "just now";
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  return `${Math.round(sec / 3600)}h ago`;
+}
+
+function showToast(text) {
+  const el = document.getElementById("toast");
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => { el.hidden = true; }, 6000);
+}
+
+function renderLive(status) {
+  const el = document.getElementById("liveValue");
+  const hit = status && status.last_hit;
+  el.classList.remove("live-ok", "live-stale");
+  if (!hit || !hit.ts) {
+    el.textContent = "no emblem request yet";
+    el.classList.add("live-stale");
+    return;
+  }
+  const ago = formatAgo(hit.ts);
+  const age = Date.now() / 1000 - Number(hit.ts);
+  if (age <= LIVE_FRESH_S) {
+    el.textContent = ago;
+    el.classList.add("live-ok");
+  } else {
+    el.textContent = ago + " — open a profile if this is stale";
+    el.classList.add("live-stale");
+  }
+}
+
+function renderSessionBanner(status) {
+  const el = document.getElementById("sessionBanner");
+  el.hidden = !(status && status.needs_session_reset);
+}
+
+function maybeToastCapture(status) {
+  const cap = status && status.last_capture;
+  if (!cap || cap.seq == null) return;
+  const seen = Number(sessionStorage.getItem(CAPTURE_SEQ_KEY) || "0");
+  if (cap.seq <= seen) return;
+  const recent = Date.now() / 1000 - Number(cap.ts || 0) <= 15;
+  const isNewThisVisit = seen > 0 || recent;
+  sessionStorage.setItem(CAPTURE_SEQ_KEY, String(cap.seq));
+  if (isNewThisVisit) showToast("Captured an emblem — it is in Your emblems.");
+}
+
+document.getElementById("sessionClearBtn").addEventListener("click", async () => {
+  await postJSON("/api/session-reset", {});
+  if (currentStatus) currentStatus.needs_session_reset = false;
+  renderSessionBanner(currentStatus);
+});
 
 async function getJSON(url) {
   const r = await fetch(url);
@@ -65,6 +128,18 @@ function listKeys(list) {
   return list.map((e) => `${e.group}:${e.slot}`).join(",");
 }
 
+function visibleEmblems() {
+  const q = libraryQuery.trim().toLowerCase();
+  if (!q) return currentEmblems;
+  return currentEmblems.filter((e) => (e.label || "").toLowerCase().includes(q));
+}
+
+function riskText(risks) {
+  if (!risks || !risks.length) return "";
+  const bits = risks.map((r) => (r === "ranks" ? "ranks" : "weapons"));
+  return "Uses " + bits.join(" and ") + " — game may refuse if locked";
+}
+
 function thumbSrc(e) {
   const v = e.mtime ? `?v=${e.mtime}` : "";
   return `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png${v}`;
@@ -102,6 +177,10 @@ function fillCard(card, e) {
   }
   card.querySelector(".emblem-date").textContent =
     (e.source === "editor" ? "Editor · " : "") + fmtDate(e.captured_at);
+  const risk = card.querySelector(".emblem-risk");
+  const note = riskText(e.risks);
+  risk.hidden = !note;
+  risk.textContent = note;
   const labelInput = card.querySelector(".emblem-label-input");
   const nextLabel = e.label || `Emblem from ${fmtDate(e.captured_at)}`;
   if (document.activeElement !== labelInput && labelInput.value !== nextLabel) {
@@ -125,6 +204,16 @@ function bindCard(card) {
   });
   card.addEventListener("click", () => {
     selectEmblem({ group: card.dataset.group, slot: Number(card.dataset.slot) });
+  });
+  card.querySelector(".emblem-delete").addEventListener("click", async (evt) => {
+    evt.stopPropagation();
+    const name = card.querySelector(".emblem-label-input").value.trim() || "this emblem";
+    if (!confirm(`Delete “${name}”? This cannot be undone.`)) return;
+    await postJSON(
+      `/api/emblems/${encodeURIComponent(card.dataset.group)}/${card.dataset.slot}/delete`,
+      {},
+    );
+    await refreshAll();
   });
 }
 
@@ -152,16 +241,17 @@ function selectEmblem(e) {
 function renderEmblems() {
   const list = document.getElementById("emblemList");
   const empty = document.getElementById("emblemsEmpty");
+  const shown = visibleEmblems();
   empty.style.display = currentEmblems.length ? "none" : "";
-  const keys = listKeys(currentEmblems);
-  if (keys === renderedKeys && list.children.length === currentEmblems.length) {
-    currentEmblems.forEach((e, i) => fillCard(list.children[i], e));
+  const keys = listKeys(shown);
+  if (keys === renderedKeys && list.children.length === shown.length) {
+    shown.forEach((e, i) => fillCard(list.children[i], e));
     return;
   }
   renderedKeys = keys;
   list.innerHTML = "";
   const tpl = document.getElementById("emblemCardTpl");
-  for (const e of currentEmblems) {
+  for (const e of shown) {
     const node = tpl.content.cloneNode(true);
     const card = node.querySelector(".emblem-card");
     fillCard(card, e);
@@ -171,6 +261,33 @@ function renderEmblems() {
 }
 
 document.getElementById("refreshBtn").addEventListener("click", refreshAll);
+document.getElementById("librarySearch").addEventListener("input", () => {
+  libraryQuery = document.getElementById("librarySearch").value;
+  renderedKeys = "";
+  renderEmblems();
+});
+document.getElementById("importBtn").addEventListener("click", () => {
+  document.getElementById("importFile").click();
+});
+document.getElementById("importFile").addEventListener("change", async (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const label = file.name.replace(/\.bin$/i, "").trim() || "Imported emblem";
+  const res = await postJSON("/api/emblems/import", {
+    data_base64: btoa(bin),
+    label,
+  });
+  if (!res.ok) {
+    showToast(res.error || "Could not import that file");
+    return;
+  }
+  await refreshAll();
+  showToast("Imported — select it, then Show.");
+});
 
 // ---------- refresh loop ----------
 
@@ -179,9 +296,15 @@ async function refreshStatus() {
   currentStatus = {
     mode: next.mode,
     selected: selectInFlight || next.selected,
+    last_hit: next.last_hit,
+    last_capture: next.last_capture,
+    needs_session_reset: next.needs_session_reset,
   };
   renderMode();
   paintSelection();
+  renderLive(currentStatus);
+  renderSessionBanner(currentStatus);
+  maybeToastCapture(currentStatus);
 }
 
 async function refreshEmblemList() {
@@ -197,10 +320,16 @@ async function refreshAll() {
   currentStatus = {
     mode: status.mode,
     selected: selectInFlight || status.selected,
+    last_hit: status.last_hit,
+    last_capture: status.last_capture,
+    needs_session_reset: status.needs_session_reset,
   };
   currentEmblems = emblems;
   renderMode();
   renderEmblems();
+  renderLive(currentStatus);
+  renderSessionBanner(currentStatus);
+  maybeToastCapture(currentStatus);
 }
 
 loadNetworkInfo();

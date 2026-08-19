@@ -21,7 +21,11 @@ Only one mode runs at a time.
 
 Click the text under a card to rename it to something you'll recognize later, like "Sam's dragon emblem," instead of the default.
 
-The toolkit can keep many captured emblems on your PC. Show mode only sends **one** of them to the console at a time (the card with the checkmark).
+The toolkit can keep many captured emblems on your PC. Show mode only sends **one** of them to the console at a time (the card with the checkmark). Search the list by name, **Import .bin** to add a file you already have, and **Delete** on a card to throw one away.
+
+The header **PS5 last seen** line updates when the console actually requests emblem data through this proxy. If it stays on “no emblem request yet,” the PS5 is not using the proxy setting.
+
+After a successful Show load, a banner stays up until you click **I restarted the game**. That is the reminder that BO2 will not fetch a second emblem until you restart (or Zombies → Multiplayer).
 
 ## Copying an emblem onto your own account
 
@@ -56,7 +60,7 @@ The in-game editor is slow. This toolkit includes a PC editor at
 There is **no From image**. Dropping a picture and rebuilding it with 32 shapes was removed because the result was not a usable copy.
 
 1. Click **Emblem editor**, or **New emblem**.
-2. Click shapes on the left to add layers. Drag on the canvas to move them. Use the right-hand panel for color, size, rotation, outline, and flip.
+2. Click shapes on the left to add layers. Drag on the canvas to move them. Use the right-hand panel for color, size, rotation, outline, and flip. Ctrl+Z undoes, Ctrl+D duplicates a layer, Ctrl+C / Ctrl+V copy and paste. Outlined layers show as a thin edge on the live canvas.
 3. Drag layers in the list to change order. The top of the list is the front.
 4. **Save** keeps a copy in "Your emblems" on the PC. **Use in Show** saves it, selects it, and switches the proxy to Show mode.
 5. Open your own emblem editor on the PS5 and **save in the game**, same as with a captured emblem. Until you do that, it will vanish when you leave the proxy.
@@ -87,6 +91,9 @@ The game still has the first load cached, so it never asked the proxy for the se
 
 **I disconnected from the proxy and the emblem left my account. It only stayed on my player card while I was connected.**
 Show mode was only *displaying* it. The player card can show the injected emblem for as long as the PS5 is using the proxy. It is not written to your account until you open **your** emblem editor and save. After that, turn the toolkit Off and check again — that is the real test.
+
+**The control panel never leaves “no emblem request yet”**
+The PS5 is not sending emblem HTTP through this PC. Recheck the proxy IP/port, firewall, and that the toolkit window is still open. **PS5 last seen** only moves when the game actually asks for emblem data.
 
 **I switched back to Off but I still see the captured emblem somewhere. Why?**
 That's the PS5's own local cache still showing what it last loaded, not something the toolkit is still doing. Switching modes only changes what the proxy would serve on the next request, it doesn't force the console to ask again.

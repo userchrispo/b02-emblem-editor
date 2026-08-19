@@ -21,6 +21,10 @@
       <span class="setup-label">PS5 proxy setting</span>
       <span class="setup-value" id="setupValue">detecting…</span>
     </div>
+    <div class="setup-box" id="liveBox">
+      <span class="setup-label">PS5 last seen</span>
+      <span class="setup-value" id="liveValue">no emblem request yet</span>
+    </div>
     <a class="btn btn-ghost" href="/editor.html">Emblem editor</a>
   </div>
 </header>
@@ -47,6 +51,10 @@
       </button>
     </div>
     <p class="mode-hint" id="modeHint"></p>
+    <div class="session-banner" id="sessionBanner" hidden>
+      <p>The game already loaded an emblem this session. Save it in-game first, then restart Black Ops II (or switch to Zombies and back to Multiplayer) before Show-ing another. Backing out of the editor is not enough.</p>
+      <button class="btn btn-ghost btn-small" id="sessionClearBtn" type="button">I restarted the game</button>
+    </div>
     <div class="warning-box">
       <p><strong>Save in the in-game editor or it will vanish.</strong> Show mode only previews the emblem while the PS5 is using this proxy — including on your player card. Open your own emblem editor and save, the same way you save something you painted. Then switch to Off and check. If you never saved in-game, disconnecting takes it off your account.</p>
       <p><strong>The editor only checks once per session.</strong> After you open your emblem editor the first time, the game caches what it loaded and won't check again, even if you select a different emblem here. To copy a second one: save the first in-game, restart the game or switch to Zombies and back to Multiplayer, select the next card, Show, then save it to a <em>different</em> slot.</p>
@@ -58,6 +66,9 @@
     <div class="section-head">
       <h2>Your emblems</h2>
       <div class="section-actions">
+        <input id="librarySearch" type="search" placeholder="Search emblems" aria-label="Search emblems">
+        <button class="btn btn-ghost btn-small" id="importBtn" type="button">Import .bin</button>
+        <input id="importFile" type="file" accept=".bin,application/octet-stream" hidden>
         <a class="btn btn-ghost btn-small" href="/editor.html">New emblem</a>
         <button class="btn btn-ghost btn-small" id="refreshBtn">Refresh</button>
       </div>
@@ -77,16 +88,22 @@
   </p>
 </footer>
 
+<div id="toast" class="toast" hidden role="status"></div>
+
 <template id="emblemCardTpl">
   <div class="emblem-card">
     <div class="emblem-select-indicator">✓</div>
     <div class="thumb-frame"><img class="emblem-thumb" alt="emblem"></div>
     <input class="emblem-label-input" placeholder="Unnamed emblem">
     <span class="emblem-date"></span>
-    <button class="btn btn-ghost btn-small emblem-edit" type="button">Edit</button>
+    <span class="emblem-risk" hidden></span>
+    <div class="card-actions">
+      <button class="btn btn-ghost btn-small emblem-edit" type="button">Edit</button>
+      <button class="btn btn-ghost btn-small emblem-delete" type="button">Delete</button>
+    </div>
   </div>
 </template>
 
-<script src="/app.js?v=select-fast"></script>
+<script src="/app.js?v=live1"></script>
 </body>
 </html>

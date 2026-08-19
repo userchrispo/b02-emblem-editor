@@ -19,6 +19,7 @@ RESOURCE_DIR = getattr(sys, "_MEIPASS", ROOT_DIR)
 SAVED_DIR = os.path.join(ROOT_DIR, "saved")
 SHAPES_DIR = os.path.join(RESOURCE_DIR, "reference_shapes")
 STATE_FILE = os.path.join(ROOT_DIR, "state.txt")
+ACTIVITY_FILE = os.path.join(ROOT_DIR, "activity.json")
 
 ACTIVE_NAME = "_active"  # reserved pseudo-group: the currently armed injection set
 

@@ -25,6 +25,8 @@
   <div class="editor-actions">
     <button class="btn btn-ghost" id="newBtn" type="button">New</button>
     <button class="btn btn-ghost" id="openBtn" type="button">Open</button>
+    <button class="btn btn-ghost" id="importBtn" type="button">Import .bin</button>
+    <input id="importFile" type="file" accept=".bin,application/octet-stream" hidden>
     <button class="btn btn-ghost" id="downloadBtn" type="button">Download .bin</button>
     <button class="btn btn-ghost" id="saveBtn" type="button">Save</button>
     <button class="btn btn-accent" id="showBtn" type="button">Use in Show</button>
@@ -47,7 +49,7 @@
     <div class="stage-frame">
       <canvas id="emblemCanvas" width="512" height="512" tabindex="0" aria-label="Emblem canvas. Drag to move the selected layer."></canvas>
     </div>
-    <p class="stage-hint">Click a shape to add it. Drag to move · arrows nudge · Delete removes · [ ] rotate.</p>
+    <p class="stage-hint">Click a shape to add it. Drag to move · arrows nudge · Delete removes · Ctrl+Z undo · Ctrl+D duplicate · [ ] rotate.</p>
   </section>
 
   <aside class="panel inspect-panel" aria-label="Layers and properties">
@@ -96,7 +98,8 @@
             <span>Flipped</span>
           </label>
         </div>
-        <p class="muted inspector-note">Outlined is stored correctly for the game; the live canvas shows a filled preview.</p>
+        <p class="muted inspector-note">Outlined draws a thin edge, the same way the game does.</p>
+        <button class="btn btn-ghost btn-small" id="duplicateLayerBtn" type="button">Duplicate layer</button>
         <button class="btn btn-ghost btn-small" id="deleteLayerBtn" type="button">Remove layer</button>
       </div>
     </div>
@@ -112,6 +115,6 @@
   <div class="open-grid" id="openGrid"></div>
 </dialog>
 
-<script src="/editor.js?v=noimg1"></script>
+<script src="/editor.js?v=craft1"></script>
 </body>
 </html>

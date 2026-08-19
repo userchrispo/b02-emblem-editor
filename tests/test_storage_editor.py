@@ -54,6 +54,36 @@ class SaveAuthored(unittest.TestCase):
         self.assertEqual(storage.get_emblem_label(group, 0), "Second")
         self.assertEqual(len(storage.list_groups()), 1)
 
+    def test_delete_removes_slot(self):
+        blob = encode_slot_file_bytes([])
+        group, slot = storage.save_authored_emblem(blob, "Gone")
+        self.assertTrue(storage.delete_emblem(group, slot))
+        self.assertEqual(storage.list_emblems(), [])
+
+    def test_import_roundtrip(self):
+        layers = [{
+            "index": 0, "shape": 192,
+            "r": 1, "g": 0, "b": 0, "a": 1,
+            "x": 0, "y": 0, "sx": -1, "sy": -1, "rot": 0,
+            "outlined": False, "flipped": False,
+        }]
+        blob = encode_slot_file_bytes(layers)
+        group, slot = storage.import_slot_bytes(blob, "From file")
+        parsed = parse_slot_file(storage.slot_path(group, slot))
+        self.assertEqual(parsed[0]["shape"], 192)
+        self.assertEqual(storage.get_emblem_label(group, slot), "From file")
+
+    def test_rank_risk_on_list(self):
+        layers = [{
+            "index": 0, "shape": 198,
+            "r": 1, "g": 1, "b": 1, "a": 1,
+            "x": 0, "y": 0, "sx": -1, "sy": -1, "rot": 0,
+            "outlined": False, "flipped": False,
+        }]
+        blob = encode_slot_file_bytes(layers)
+        storage.save_authored_emblem(blob, "Rank")
+        self.assertEqual(storage.list_emblems()[0]["risks"], ["ranks"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,8 @@ const ALPHA_MIN = 12;
 const $ = (id) => document.getElementById(id);
 
 let atlas = null;
+let layerClip = null;
+const history = { undo: [], redo: [] };
 
 async function getJSON(url) {
   const r = await fetch(url);
@@ -94,6 +96,91 @@ function setStatus() {
   $("statusLine").textContent = bits.join(" · ");
 }
 
+function snapshot() {
+  return {
+    layers: state.layers.map((L) => Object.assign({}, L)),
+    selected: state.selected,
+    label: state.label,
+  };
+}
+
+function pushUndo() {
+  history.undo.push(snapshot());
+  if (history.undo.length > 80) history.undo.shift();
+  history.redo.length = 0;
+}
+
+function applySnap(snap) {
+  state.layers = snap.layers.map((L) => Object.assign({}, L));
+  state.selected = snap.selected;
+  state.label = snap.label;
+  state.dirty = true;
+  renderAll();
+}
+
+function undo() {
+  if (!history.undo.length) return;
+  history.redo.push(snapshot());
+  applySnap(history.undo.pop());
+}
+
+function redo() {
+  if (!history.redo.length) return;
+  history.undo.push(snapshot());
+  applySnap(history.redo.pop());
+}
+
+function clearHistory() {
+  history.undo.length = 0;
+  history.redo.length = 0;
+}
+
+function outlineGlyph(src, radius) {
+  const w = src.width;
+  const h = src.height;
+  const sctx = src.getContext("2d");
+  const img = sctx.getImageData(0, 0, w, h);
+  const a = new Uint8ClampedArray(w * h);
+  for (let i = 0, p = 3; i < a.length; i++, p += 4) a[i] = img.data[p];
+  const r = Math.max(1, radius | 0);
+  const dil = new Uint8ClampedArray(a.length);
+  const ero = new Uint8ClampedArray(a.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let mx = 0;
+      let mn = 255;
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= w || yy >= h) {
+            mn = 0;
+            continue;
+          }
+          const v = a[yy * w + xx];
+          if (v > mx) mx = v;
+          if (v < mn) mn = v;
+        }
+      }
+      dil[y * w + x] = mx;
+      ero[y * w + x] = mn;
+    }
+  }
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const octx = out.getContext("2d");
+  const oimg = octx.createImageData(w, h);
+  for (let i = 0, p = 0; i < a.length; i++, p += 4) {
+    oimg.data[p] = img.data[p];
+    oimg.data[p + 1] = img.data[p + 1];
+    oimg.data[p + 2] = img.data[p + 2];
+    oimg.data[p + 3] = Math.max(0, dil[i] - ero[i]);
+  }
+  octx.putImageData(oimg, 0, 0);
+  return out;
+}
+
 function atlasTile(shapeId) {
   return atlas && atlas.tiles[String(shapeId)];
 }
@@ -101,7 +188,7 @@ function atlasTile(shapeId) {
 function tintedGlyph(L) {
   const tile = atlasTile(L.shape);
   if (!atlas || !tile) return null;
-  const key = `${L.shape}|${Math.round(L.r * 255)}|${Math.round(L.g * 255)}|${Math.round(L.b * 255)}`;
+  const key = `${L.shape}|${Math.round(L.r * 255)}|${Math.round(L.g * 255)}|${Math.round(L.b * 255)}|${L.outlined ? 1 : 0}`;
   if (tintCache.has(key)) return tintCache.get(key);
   const src = document.createElement("canvas");
   src.width = atlas.cell;
@@ -113,9 +200,10 @@ function tintedGlyph(L) {
   sctx.fillRect(0, 0, src.width, src.height);
   sctx.globalCompositeOperation = "destination-in";
   sctx.drawImage(atlas.img, tile.x, tile.y, atlas.cell, atlas.cell, 0, 0, atlas.cell, atlas.cell);
+  const glyph = L.outlined ? outlineGlyph(src, 2) : src;
   if (tintCache.size > 160) tintCache.clear();
-  tintCache.set(key, src);
-  return src;
+  tintCache.set(key, glyph);
+  return glyph;
 }
 
 function glyphAlpha(shapeId, u, v) {
@@ -205,6 +293,7 @@ function addLayer(shapeId) {
     $("statusLine").textContent = "32 layer limit — remove one first";
     return;
   }
+  pushUndo();
   state.layers.push({
     index: state.layers.length,
     shape: shapeId,
@@ -221,6 +310,7 @@ function addLayer(shapeId) {
 
 function removeSelected() {
   if (state.selected < 0) return;
+  pushUndo();
   state.layers.splice(state.selected, 1);
   reindex();
   state.selected = Math.min(state.selected, state.layers.length - 1);
@@ -335,6 +425,7 @@ function renderLayers() {
       const from = Number(ev.dataTransfer.getData("text/plain"));
       const to = i;
       if (Number.isNaN(from) || from === to) return;
+      pushUndo();
       const [moved] = state.layers.splice(from, 1);
       state.layers.splice(to, 0, moved);
       reindex();
@@ -410,16 +501,22 @@ function bindInspector() {
   $("propOutline").addEventListener("change", () => {
     const L = state.layers[state.selected];
     if (!L) return;
+    pushUndo();
     L.outlined = $("propOutline").checked;
     markDirty();
   });
   $("propFlip").addEventListener("change", () => {
     const L = state.layers[state.selected];
     if (!L) return;
+    pushUndo();
     L.flipped = $("propFlip").checked;
     markDirty();
   });
   $("deleteLayerBtn").addEventListener("click", removeSelected);
+  $("duplicateLayerBtn").addEventListener("click", duplicateSelected);
+  ["propColor", "propA", "propW", "propH", "propRot"].forEach((id) => {
+    $(id).addEventListener("pointerdown", () => pushUndo());
+  });
 }
 
 function canvasPos(ev) {
@@ -469,6 +566,7 @@ function bindCanvas() {
     const hit = hitTest(p.x, p.y);
     state.selected = hit;
     if (hit >= 0) {
+      pushUndo();
       const L = state.layers[hit];
       state.dragging = { dx: p.x - L.x, dy: p.y - L.y };
     } else {
@@ -492,24 +590,89 @@ function bindCanvas() {
   });
 }
 
+function duplicateSelected() {
+  if (state.selected < 0) return;
+  if (state.layers.length >= MAX_LAYERS) {
+    $("statusLine").textContent = "32 layer limit — remove one first";
+    return;
+  }
+  pushUndo();
+  const src = state.layers[state.selected];
+  const copy = Object.assign({}, src, { x: src.x + 0.04, y: src.y + 0.04 });
+  state.layers.splice(state.selected + 1, 0, copy);
+  reindex();
+  state.selected += 1;
+  markDirty({ layers: true });
+}
+
+function copySelected() {
+  if (state.selected < 0) return;
+  layerClip = Object.assign({}, state.layers[state.selected]);
+}
+
+function pasteLayer() {
+  if (!layerClip) return;
+  if (state.layers.length >= MAX_LAYERS) {
+    $("statusLine").textContent = "32 layer limit — remove one first";
+    return;
+  }
+  pushUndo();
+  const copy = Object.assign({}, layerClip, {
+    x: layerClip.x + 0.04,
+    y: layerClip.y + 0.04,
+  });
+  const at = state.selected < 0 ? state.layers.length : state.selected + 1;
+  state.layers.splice(at, 0, copy);
+  reindex();
+  state.selected = at;
+  markDirty({ layers: true });
+}
+
 function bindKeys() {
   document.addEventListener("keydown", (ev) => {
     const tag = (ev.target && ev.target.tagName) || "";
     if (tag === "INPUT" || tag === "TEXTAREA") return;
-    const L = state.layers[state.selected];
+    const cmd = ev.ctrlKey || ev.metaKey;
+    if (cmd && ev.key.toLowerCase() === "z") {
+      ev.preventDefault();
+      if (ev.shiftKey) redo();
+      else undo();
+      return;
+    }
+    if (cmd && ev.key.toLowerCase() === "y") {
+      ev.preventDefault();
+      redo();
+      return;
+    }
+    if (cmd && ev.key.toLowerCase() === "d") {
+      ev.preventDefault();
+      duplicateSelected();
+      return;
+    }
+    if (cmd && ev.key.toLowerCase() === "c") {
+      ev.preventDefault();
+      copySelected();
+      return;
+    }
+    if (cmd && ev.key.toLowerCase() === "v") {
+      ev.preventDefault();
+      pasteLayer();
+      return;
+    }
     if (ev.key === "Delete" || ev.key === "Backspace") {
       ev.preventDefault();
       removeSelected();
       return;
     }
+    const L = state.layers[state.selected];
     if (!L) return;
     const step = ev.shiftKey ? 0.05 : 0.01;
-    if (ev.key === "ArrowLeft") { L.x -= step; markDirty(); ev.preventDefault(); }
-    if (ev.key === "ArrowRight") { L.x += step; markDirty(); ev.preventDefault(); }
-    if (ev.key === "ArrowUp") { L.y -= step; markDirty(); ev.preventDefault(); }
-    if (ev.key === "ArrowDown") { L.y += step; markDirty(); ev.preventDefault(); }
-    if (ev.key === "[") { L.rot = (L.rot - (ev.shiftKey ? 15 : 5) + 360) % 360; markDirty(); }
-    if (ev.key === "]") { L.rot = (L.rot + (ev.shiftKey ? 15 : 5)) % 360; markDirty(); }
+    if (ev.key === "ArrowLeft") { pushUndo(); L.x -= step; markDirty(); ev.preventDefault(); }
+    if (ev.key === "ArrowRight") { pushUndo(); L.x += step; markDirty(); ev.preventDefault(); }
+    if (ev.key === "ArrowUp") { pushUndo(); L.y -= step; markDirty(); ev.preventDefault(); }
+    if (ev.key === "ArrowDown") { pushUndo(); L.y += step; markDirty(); ev.preventDefault(); }
+    if (ev.key === "[") { pushUndo(); L.rot = (L.rot - (ev.shiftKey ? 15 : 5) + 360) % 360; markDirty(); }
+    if (ev.key === "]") { pushUndo(); L.rot = (L.rot + (ev.shiftKey ? 15 : 5)) % 360; markDirty(); }
   });
 }
 
@@ -521,6 +684,7 @@ function newEmblem() {
   state.group = null;
   state.slot = 0;
   state.dirty = false;
+  clearHistory();
   renderAll();
 }
 
@@ -535,6 +699,7 @@ async function openEmblem(group, slot) {
   state.dirty = false;
   const dlg = $("openDialog");
   if (dlg.open) dlg.close();
+  clearHistory();
   renderAll();
 }
 
@@ -597,6 +762,25 @@ function bindToolbar() {
     }
   });
   $("downloadBtn").addEventListener("click", () => downloadBin().catch(console.error));
+  $("importBtn").addEventListener("click", () => $("importFile").click());
+  $("importFile").addEventListener("change", async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (!file) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    try {
+      const res = await postJSON("/api/emblems/import", {
+        data_base64: btoa(bin),
+        label: file.name.replace(/\.bin$/i, "").trim() || "Imported emblem",
+      });
+      if (!res.ok) throw new Error(res.error || "import failed");
+      await openEmblem(res.group, res.slot);
+    } catch (err) {
+      $("statusLine").textContent = err.message || "Could not import that file";
+    }
+  });
   $("emblemName").addEventListener("input", () => {
     state.label = $("emblemName").value;
     state.dirty = true;

@@ -16,6 +16,7 @@ from . import config
 from .state import read_state
 from .storage import get_or_create_capture_group, write_slot_bytes
 from .broadcast import read_selected_data
+from .activity import record_event
 
 # matches ".../u51b08745d269.slot_504?..." -> userhash, slot number
 PATH_RE = re.compile(r"/(u[0-9a-fA-F]+)\.slot_(\d+)")
@@ -103,9 +104,11 @@ def handle_target_request(client, req, host, port, path):
             # already has a cached copy of one of your slots and may not ask
             # again right away. Nothing to fix here, just worth noting.
             if _req_header(req, "If-None-Match") or _req_header(req, "If-Modified-Since") or _req_header(req, "Range"):
+                record_event("show-cache-check", slot=slot_num)
                 log(f"  Show: sent selected emblem for slot_{slot_num}, but the console sent a "
                     "cache-check request - it may keep using its cached copy instead")
             else:
+                record_event("show", slot=slot_num)
                 log(f"  Show: sent selected emblem for slot_{slot_num} ({len(selected)} bytes)")
             return
         log(f"  Show mode is on but no emblem is selected - passing real data through")
@@ -115,7 +118,10 @@ def handle_target_request(client, req, host, port, path):
     if mode == "CAPTURE" and slot_num is not None:
         group = get_or_create_capture_group(userhash)
         write_slot_bytes(group, slot_num, headers + body)
+        record_event("capture", slot=slot_num, group=group)
         log(f"  Captured: group {group} slot_{slot_num} ({len(body)} bytes)")
+    else:
+        record_event("passthrough", slot=slot_num)
 
     client.sendall(headers + body)
 

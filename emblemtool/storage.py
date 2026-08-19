@@ -5,6 +5,7 @@ saved emblem slot that player's console requested.
 import json
 import os
 import re
+import shutil
 import threading
 import time
 
@@ -122,9 +123,19 @@ def list_emblems():
                 "captured_at": meta.get("first_captured", ""),
                 "source": meta.get("source", "capture"),
                 "mtime": mtime,
+                "risks": _slot_risks(path),
             })
     emblems.sort(key=lambda e: e["captured_at"], reverse=True)
     return emblems
+
+
+def _slot_risks(path):
+    try:
+        from .shapes.render import parse_slot_file
+        from .shapes.unlocks import layer_risks
+        return layer_risks(parse_slot_file(path))
+    except Exception:
+        return []
 
 
 def slot_path(group, slot):
@@ -177,3 +188,41 @@ def save_authored_emblem(data, label, group=None, slot=0):
         })
         write_slot_bytes(name, slot, data)
         return name, slot
+
+
+def delete_emblem(group, slot):
+    """Remove one saved slot. Deletes the group folder if it is then empty."""
+    path = slot_path(group, slot)
+    if not os.path.isfile(path):
+        return False
+    os.remove(path)
+    try:
+        from .thumbs import THUMB_SIZE, thumb_path
+        tp = thumb_path(group, slot, THUMB_SIZE)
+        if os.path.isfile(tp):
+            os.remove(tp)
+    except OSError:
+        pass
+    set_emblem_label(group, slot, "")
+    if not group_slots(group):
+        shutil.rmtree(group_dir(group), ignore_errors=True)
+    return True
+
+
+def import_slot_bytes(data, label=None):
+    """Save a captured or exported .bin into the library.
+
+    Accepts HTTP-wrapped files or a raw 1408-byte body.
+    """
+    from .shapes.render import (
+        LAYER_SIZE, NUM_LAYERS, encode_layers, parse_slot_bytes, strip_http,
+        wrap_slot_http,
+    )
+    if not data:
+        raise ValueError("That is not an emblem file")
+    body = strip_http(data)
+    if len(body) < LAYER_SIZE:
+        raise ValueError("That is not an emblem file")
+    layers = parse_slot_bytes(data)
+    blob = wrap_slot_http(encode_layers(layers) if layers else body[: NUM_LAYERS * LAYER_SIZE])
+    return save_authored_emblem(blob, label or "Imported emblem")

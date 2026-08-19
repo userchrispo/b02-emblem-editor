@@ -24,3 +24,18 @@ Two problems in the PC emblem editor:
 **The editor loaded slowly.** Opening it requested every shape PNG on its own — hundreds of them through the local server. It now loads one packed sheet, and dragging or moving sliders no longer rebuilds the whole side panel on every move.
 
 Restart the toolkit (`python run.py` or `start.bat`) and refresh the editor so this version is what you’re running. Then click a shape that’s tucked under another — it should select the one you’re pointing at.
+
+## 19 Aug 2026 — Control panel and editor craft
+
+**PS5 last seen.** The header shows when the console last requested emblem data through this proxy, so you can tell a bad proxy setting from “the game has not asked yet.”
+
+**Capture toast.** When Capture saves a card, a notice appears in the corner.
+
+**Session banner.** After Show actually sends an emblem, a reminder stays up until you click **I restarted the game**. BO2 still only fetches once per session; this just makes that harder to miss.
+
+**Library.** Search by name, import a `.bin`, delete a card. Cards that use ranks or weapon icons say so, because the game may refuse those if they are still locked.
+
+**Editor.** Undo/redo (Ctrl+Z / Ctrl+Y), duplicate (Ctrl+D), copy/paste layers, and outlined layers draw as a thin edge on the live canvas.
+
+**Exe.** Releases for this copy live at [userchrispo/b02-emblem-editor](https://github.com/userchrispo/b02-emblem-editor/releases). A Windows GitHub Action builds `BO2EmblemToolkit.exe` on a version tag (`v*`) or a manual workflow run.
+

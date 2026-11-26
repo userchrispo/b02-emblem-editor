@@ -194,6 +194,13 @@ function bindCard(card) {
     evt.stopPropagation();
     location.href = `/editor.html?group=${encodeURIComponent(card.dataset.group)}&slot=${card.dataset.slot}`;
   });
+  const inspectBtn = card.querySelector(".emblem-inspect");
+  if (inspectBtn) {
+    inspectBtn.addEventListener("click", (evt) => {
+      evt.stopPropagation();
+      openBinaryInspector(card.dataset.group, card.dataset.slot);
+    });
+  }
   const labelInput = card.querySelector(".emblem-label-input");
   labelInput.addEventListener("click", (evt) => evt.stopPropagation());
   labelInput.addEventListener("change", async () => {
@@ -289,22 +296,124 @@ document.getElementById("importFile").addEventListener("change", async (ev) => {
   showToast("Imported — select it, then Show.");
 });
 
-// ---------- refresh loop ----------
+// ---------- traffic log & binary inspector ----------
 
-async function refreshStatus() {
-  const next = await getJSON("/api/status");
+function renderTraffic(status) {
+  const events = (status && status.events) || [];
+  const countEl = document.getElementById("trafficCount");
+  const tbody = document.getElementById("trafficBody");
+  if (!tbody) return;
+  if (countEl) {
+    countEl.textContent = `${events.length} request${events.length === 1 ? "" : "s"}`;
+  }
+  tbody.innerHTML = "";
+  if (!events.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "muted";
+    td.textContent = "No emblem requests observed yet.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+    return;
+  }
+  for (const ev of events.slice(0, 25)) {
+    const tr = document.createElement("tr");
+    const hdrs = ev.cache_headers
+      ? Object.entries(ev.cache_headers).map(([k, v]) => `${k}: ${v}`).join("; ")
+      : "—";
+    const cells = [
+      (ev.at || "").slice(11) || "—",
+      ev.kind || "—",
+      ev.slot != null ? `slot_${ev.slot}` : "—",
+      ev.size != null ? `${ev.size} B` : "—",
+      hdrs,
+    ];
+    cells.forEach((val, idx) => {
+      const td = document.createElement("td");
+      if (idx === 1) {
+        const badge = document.createElement("span");
+        badge.className = `kind-pill kind-${ev.kind || "passthrough"}`;
+        badge.textContent = val;
+        td.appendChild(badge);
+      } else {
+        td.textContent = val;
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+async function openBinaryInspector(group, slot) {
+  const dlg = document.getElementById("inspectDialog");
+  if (!dlg) return;
+  const info = await getJSON(`/api/emblems/${encodeURIComponent(group)}/${slot}/inspect`);
+  document.getElementById("inspectTitle").textContent =
+    `Binary inspector — ${info.label || `${group}:${slot}`}`;
+  document.getElementById("inspectSummary").textContent =
+    `${info.used_layers} / ${info.max_layers} layers · ${info.body_bytes} B body (${info.total_bytes} B total, ${info.layer_size} B/layer)`;
+  const hdrEl = document.getElementById("inspectHeaders");
+  if (info.has_http_headers && info.http_headers) {
+    hdrEl.textContent = info.http_headers;
+    hdrEl.hidden = false;
+  } else {
+    hdrEl.hidden = true;
+  }
+  const tbody = document.getElementById("inspectBody");
+  tbody.innerHTML = "";
+  for (const rec of info.records || []) {
+    const tr = document.createElement("tr");
+    const flags = [rec.outlined ? "OUTLINE" : "", rec.flipped ? "FLIP" : ""]
+      .filter(Boolean).join(", ") || "—";
+    const cells = [
+      String(rec.index),
+      rec.offset_hex,
+      `${rec.shape} (${rec.shape_label})`,
+      rec.rgba.join(", "),
+      rec.pos.join(", "),
+      rec.scale.join(", "),
+      `${rec.rot}°`,
+      flags,
+    ];
+    for (const val of cells) {
+      const td = document.createElement("td");
+      td.textContent = val;
+      tr.appendChild(td);
+    }
+    tbody.appendChild(tr);
+  }
+  dlg.showModal();
+}
+
+const closeInspectBtn = document.getElementById("closeInspectBtn");
+if (closeInspectBtn) {
+  closeInspectBtn.addEventListener("click", () => {
+    document.getElementById("inspectDialog").close();
+  });
+}
+
+// ---------- refresh loop + SSE ----------
+
+function applyStatus(next) {
   currentStatus = {
     mode: next.mode,
     selected: selectInFlight || next.selected,
     last_hit: next.last_hit,
     last_capture: next.last_capture,
     needs_session_reset: next.needs_session_reset,
+    events: next.events || [],
   };
   renderMode();
   paintSelection();
   renderLive(currentStatus);
   renderSessionBanner(currentStatus);
+  renderTraffic(currentStatus);
   maybeToastCapture(currentStatus);
+}
+
+async function refreshStatus() {
+  applyStatus(await getJSON("/api/status"));
 }
 
 async function refreshEmblemList() {
@@ -317,22 +426,39 @@ async function refreshAll() {
     getJSON("/api/status"),
     getJSON("/api/emblems"),
   ]);
-  currentStatus = {
-    mode: status.mode,
-    selected: selectInFlight || status.selected,
-    last_hit: status.last_hit,
-    last_capture: status.last_capture,
-    needs_session_reset: status.needs_session_reset,
-  };
   currentEmblems = emblems;
-  renderMode();
+  applyStatus(status);
   renderEmblems();
-  renderLive(currentStatus);
-  renderSessionBanner(currentStatus);
-  maybeToastCapture(currentStatus);
+}
+
+function connectSSE() {
+  const badge = document.getElementById("sseBadge");
+  if (typeof EventSource === "undefined") return;
+  const es = new EventSource("/api/events");
+  const onStatus = (ev) => {
+    try {
+      applyStatus(JSON.parse(ev.data));
+    } catch (_) {}
+  };
+  es.addEventListener("open", () => {
+    if (badge) { badge.textContent = "LIVE"; badge.classList.add("connected"); }
+  });
+  es.addEventListener("status", onStatus);
+  es.addEventListener("mode", onStatus);
+  es.addEventListener("select", onStatus);
+  es.addEventListener("session_reset", onStatus);
+  es.addEventListener("activity", (ev) => {
+    onStatus(ev);
+    refreshEmblemList();
+  });
+  es.addEventListener("library", () => refreshEmblemList());
+  es.addEventListener("error", () => {
+    if (badge) { badge.textContent = "POLL"; badge.classList.remove("connected"); }
+  });
 }
 
 loadNetworkInfo();
 refreshAll();
-setInterval(refreshStatus, 2500);
-setInterval(refreshEmblemList, 5000);
+connectSSE();
+setInterval(refreshStatus, 10000);
+setInterval(refreshEmblemList, 15000);

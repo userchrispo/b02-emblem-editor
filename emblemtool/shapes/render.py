@@ -266,7 +266,7 @@ def render_png(layers, size=256, bg=(24, 24, 24, 255)):
 
     # Lower index renders further back, higher index in front (confirmed by
     # comparing our composite to the game's own render of the same bytes).
-    for L in sorted(layers, key=lambda l: l["index"]):
+    for L in sorted(layers, key=lambda layer: layer["index"]):
         shape_id = L["shape"]
         # True scale is 2**raw (always positive), verified: a shape written at
         # scale 2**-1 rendered exactly half the size of one at scale 2**0.

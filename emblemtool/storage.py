@@ -15,25 +15,44 @@ _capture_lock = threading.Lock()
 _warm_threads = []
 
 _SLOT_RE = re.compile(r"^slot_(\d+)\.bin$")
+_GROUP_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
-def group_dir(name):
-    return os.path.join(config.SAVED_DIR, name)
+def validate_group_name(name, *, allow_active=False):
+    """Ensure a group name is a single safe directory component under SAVED_DIR."""
+    if not isinstance(name, str) or not _GROUP_NAME_RE.match(name):
+        raise ValueError(f"invalid group name: {name!r}")
+    if not allow_active and name == config.ACTIVE_NAME:
+        raise ValueError(f"reserved group name: {name!r}")
+    return name
+
+
+def group_dir(name, *, allow_active=False):
+    safe = validate_group_name(name, allow_active=allow_active)
+    root = os.path.abspath(config.SAVED_DIR)
+    target = os.path.abspath(os.path.join(root, safe))
+    if os.path.commonpath([root, target]) != root:
+        raise ValueError(f"path escapes saved directory: {name!r}")
+    return target
 
 
 def read_meta(name):
     path = os.path.join(group_dir(name), "meta.json")
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return None
 
 
 def write_meta(name, meta):
-    os.makedirs(group_dir(name), exist_ok=True)
-    with open(os.path.join(group_dir(name), "meta.json"), "w") as f:
+    d = group_dir(name)
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, "meta.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(meta, f)
+    os.replace(tmp, path)
 
 
 def list_groups():
@@ -41,7 +60,9 @@ def list_groups():
     os.makedirs(config.SAVED_DIR, exist_ok=True)
     names = [
         d for d in os.listdir(config.SAVED_DIR)
-        if os.path.isdir(group_dir(d)) and d != config.ACTIVE_NAME
+        if d != config.ACTIVE_NAME
+        and _GROUP_NAME_RE.match(d)
+        and os.path.isdir(group_dir(d))
     ]
 
     def sort_key(n):
@@ -139,7 +160,10 @@ def _slot_risks(path):
 
 
 def slot_path(group, slot):
-    return os.path.join(group_dir(group), f"slot_{slot}.bin")
+    slot_int = int(slot)
+    if slot_int < 0:
+        raise ValueError(f"invalid slot: {slot!r}")
+    return os.path.join(group_dir(group), f"slot_{slot_int}.bin")
 
 
 def write_slot_bytes(group, slot, data):
@@ -215,7 +239,11 @@ def import_slot_bytes(data, label=None):
     Accepts HTTP-wrapped files or a raw 1408-byte body.
     """
     from .shapes.render import (
-        LAYER_SIZE, NUM_LAYERS, encode_layers, parse_slot_bytes, strip_http,
+        LAYER_SIZE,
+        NUM_LAYERS,
+        encode_layers,
+        parse_slot_bytes,
+        strip_http,
         wrap_slot_http,
     )
     if not data:

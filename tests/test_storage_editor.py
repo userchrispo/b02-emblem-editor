@@ -9,9 +9,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from emblemtool import config
+from emblemtool import config, storage
 from emblemtool.shapes.render import encode_slot_file_bytes, parse_slot_file
-from emblemtool import storage
 
 
 class SaveAuthored(unittest.TestCase):

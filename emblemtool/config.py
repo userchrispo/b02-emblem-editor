@@ -25,7 +25,21 @@ ACTIVE_NAME = "_active"  # reserved pseudo-group: the currently armed injection 
 
 PROXY_HOST = "0.0.0.0"
 PROXY_PORT = 8080
-WEB_HOST = "0.0.0.0"
+WEB_HOST = "127.0.0.1"
 WEB_PORT = 8090
 
+PROXY_ALLOW_IPS = None  # optional set[str] of allowed client IPs (e.g. PS5 IP)
+PROXY_SOCKET_TIMEOUT = 15.0
+PROXY_MAX_HEADER_BYTES = 65536
+PROXY_MAX_BODY_BYTES = 16 * 1024 * 1024
+
 TARGET_HOST_SUBSTR = "ops2-ps3-cs.prod.demonware.net"
+
+
+def configure_data_dir(data_dir):
+    """Redirect mutable runtime files (saved emblems, state, activity) to data_dir."""
+    global SAVED_DIR, STATE_FILE, ACTIVITY_FILE
+    base = os.path.abspath(data_dir)
+    SAVED_DIR = os.path.join(base, "saved")
+    STATE_FILE = os.path.join(base, "state.txt")
+    ACTIVITY_FILE = os.path.join(base, "activity.json")

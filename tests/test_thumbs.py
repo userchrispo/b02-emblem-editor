@@ -10,9 +10,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from emblemtool import config
+from emblemtool import config, storage
 from emblemtool.shapes.render import encode_slot_file_bytes
-from emblemtool import storage
 from emblemtool.thumbs import cached_thumb_png, thumb_path
 
 

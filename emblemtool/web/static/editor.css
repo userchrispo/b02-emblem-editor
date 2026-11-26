@@ -357,3 +357,157 @@ html, body.editor-page {
   .shape-grid { max-height: 240px; }
   .layer-list { max-height: none; }
 }
+
+.stage-controls {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.stage-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+.layer-item.is-hidden .layer-name {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+.layer-icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.layer-icon-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.layer-icon-btn.active { color: var(--accent); }
+
+.swatch-strip {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.swatch-btn {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0;
+}
+.swatch-btn:hover { transform: scale(1.1); border-color: #fff; }
+.recent-swatches {
+  padding-top: 4px;
+  border-top: 1px dashed var(--border);
+}
+
+/* Image -> Emblem modal */
+.vec-dialog { width: min(760px, 95vw); }
+.vec-sub { margin: 4px 0 0; font-size: 12px; }
+.vec-dropzone {
+  border: 1px dashed var(--border);
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: 14px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.vec-dropzone:hover, .vec-dropzone.is-dragover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.vec-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.vec-pane {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+}
+.vec-pane-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+.vec-pane canvas {
+  width: 240px;
+  height: 240px;
+  border-radius: 4px;
+  background: #141418;
+  border: 1px solid var(--border);
+}
+.vec-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.vec-progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--panel-2);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.vec-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.08s linear;
+}
+.vec-stats { font-size: 12px; white-space: nowrap; }
+.vec-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-bottom: 14px;
+}
+.vec-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.vec-field em { float: right; font-style: normal; color: var(--text); }
+.vec-field select, .vec-field input[type="range"] {
+  width: 100%;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.vec-field input[type="range"] { padding: 0; border: 0; accent-color: var(--accent); }
+.vec-alpha-check { grid-column: 1 / -1; margin: 2px 0 0; }
+.vec-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .vec-compare, .vec-controls { grid-template-columns: 1fr; }
+}

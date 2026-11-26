@@ -40,12 +40,12 @@
         <span class="mode-desc">Normal internet, nothing is touched</span>
       </button>
       <button class="mode-btn" data-mode="capture">
-        <span class="mode-icon">📸</span>
+        <span class="mode-icon">◎</span>
         <span class="mode-name">Capture</span>
         <span class="mode-desc">Save the emblem of the player whose profile you open</span>
       </button>
       <button class="mode-btn" data-mode="inject">
-        <span class="mode-icon">📤</span>
+        <span class="mode-icon">↗</span>
         <span class="mode-name">Show</span>
         <span class="mode-desc">Load your selected emblem into your own emblem editor</span>
       </button>
@@ -73,17 +73,69 @@
         <button class="btn btn-ghost btn-small" id="refreshBtn">Refresh</button>
       </div>
     </div>
-    <p class="muted">Click one to select it for <strong>Show</strong>. Open the <a href="/editor.html">emblem editor</a> to build one from scratch, or click Edit on a card.</p>
+    <p class="muted">Click one to select it for <strong>Show</strong>. Open the <a href="/editor.html">emblem editor</a> to build one from scratch, or click Edit / Inspect on a card.</p>
     <p class="muted" id="emblemsEmpty">No emblems yet. Switch to <strong>Capture</strong> and open a player's profile, or <a href="/editor.html">build one in the editor</a>.</p>
     <div class="emblem-list" id="emblemList"></div>
   </section>
 
+  <section class="card">
+    <details id="trafficDetails">
+      <summary class="section-head traffic-summary">
+        <h2>Live proxy activity <span class="badge-live" id="sseBadge">SSE</span></h2>
+        <span class="muted" id="trafficCount">0 requests</span>
+      </summary>
+      <p class="muted">Intercepted plain-HTTP requests to <code>ops2-ps3-cs.prod.demonware.net</code>. HTTPS traffic is tunneled untouched and never logged.</p>
+      <div class="table-wrap">
+        <table class="data-table" id="trafficTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Action</th>
+              <th>Slot</th>
+              <th>Bytes</th>
+              <th>Cache headers</th>
+            </tr>
+          </thead>
+          <tbody id="trafficBody">
+            <tr><td colspan="5" class="muted">No emblem requests observed yet.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
 </main>
+
+<dialog id="inspectDialog" class="inspect-dialog">
+  <div class="dialog-head">
+    <h2 id="inspectTitle">Binary inspector</h2>
+    <button class="btn btn-ghost btn-small" id="closeInspectBtn" type="button">Close</button>
+  </div>
+  <p class="muted" id="inspectSummary"></p>
+  <pre class="inspect-headers" id="inspectHeaders" hidden></pre>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Offset</th>
+          <th>Shape</th>
+          <th>RGBA</th>
+          <th>Pos (x, y)</th>
+          <th>Scale</th>
+          <th>Rot</th>
+          <th>Flags</th>
+        </tr>
+      </thead>
+      <tbody id="inspectBody"></tbody>
+    </table>
+  </div>
+</dialog>
 
 <footer>
   <p>
-    BO2 Emblem Toolkit — created by <a href="https://github.com/alexkotr1" target="_blank" rel="noopener">alexkotr1</a>.
-    Licensed under the <a href="/LICENSE" target="_blank" rel="noopener">MIT License</a> — free to use and modify, credit appreciated.
+    BO2 Emblem Toolkit — originally by <a href="https://github.com/alexkotr1" target="_blank" rel="noopener">alexkotr1</a>, extended by <a href="https://github.com/userchrispo" target="_blank" rel="noopener">userchrispo</a>.
+    Licensed under the <a href="/LICENSE" target="_blank" rel="noopener">MIT License</a>.
     For personal use on your own PS5 and network.
   </p>
 </footer>
@@ -99,11 +151,12 @@
     <span class="emblem-risk" hidden></span>
     <div class="card-actions">
       <button class="btn btn-ghost btn-small emblem-edit" type="button">Edit</button>
+      <button class="btn btn-ghost btn-small emblem-inspect" type="button" title="Inspect 1408-byte .bin structure">.bin</button>
       <button class="btn btn-ghost btn-small emblem-delete" type="button">Delete</button>
     </div>
   </div>
 </template>
 
-<script src="/app.js?v=live1"></script>
+<script src="/app.js?v=live2"></script>
 </body>
 </html>

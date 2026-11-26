@@ -1,4 +1,27 @@
-// PC emblem editor. Plain JS, no build step — same contract as the control panel.
+// PC emblem editor (modular ES entry point, zero build step).
+import {
+  exportBinBlob,
+  exportPngBlob,
+  fetchEmblemLayers,
+  fetchEmblemList,
+  fetchShapes,
+  importBinBytes,
+  isDemoMode,
+  saveEmblemRequest,
+} from "./editor/api.js";
+import {
+  atlasTile,
+  drawCanvas,
+  hexRgb,
+  hitHandle,
+  hitTest,
+  loadAtlas,
+  rgbHex,
+  snapPoint,
+} from "./editor/canvas.js";
+import { createHistory } from "./editor/history.js";
+import { prepareTargetPixels, vectorizeImage } from "./editor/vectorizer.js";
+
 const MAX_LAYERS = 32;
 const CAT_LABELS = {
   tools: "Shapes",
@@ -7,6 +30,14 @@ const CAT_LABELS = {
   gear: "Weapons",
   emblems: "Emblems",
 };
+
+// Classic BO2-inspired tactical color swatches
+const PRESET_SWATCHES = [
+  "#ffffff", "#d4d4d8", "#71717a", "#18181b",
+  "#ef4444", "#f97316", "#facc15", "#22c55e",
+  "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+  "#991b1b", "#9a3412", "#854d0e", "#166534",
+];
 
 const state = {
   layers: [],
@@ -19,52 +50,31 @@ const state = {
   category: "tools",
   query: "",
   uniform: true,
-  dragging: null,
+  showGrid: true,
+  snapEnabled: true,
+  snapGuides: null,
+  interaction: null, // { mode: 'move' | 'resize' | 'rotate', ... }
+  recentColors: [],
 };
 
-const tintCache = new Map();
-const ALPHA_MIN = 12;
 const $ = (id) => document.getElementById(id);
-
+const history = createHistory(80);
 let atlas = null;
 let layerClip = null;
-const history = { undo: [], redo: [] };
 
-async function getJSON(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function postJSON(url, body) {
-  const r = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body || {}),
-  });
-  const ct = r.headers.get("content-type") || "";
-  if (ct.includes("application/json")) return r.json();
-  if (!r.ok) throw new Error(await r.text());
-  return r;
-}
-
-function rgbHex(L) {
-  const h = (v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0");
-  return `#${h(L.r)}${h(L.g)}${h(L.b)}`;
-}
-function hexRgb(hex) {
-  const n = hex.replace("#", "");
-  return {
-    r: parseInt(n.slice(0, 2), 16) / 255,
-    g: parseInt(n.slice(2, 4), 16) / 255,
-    b: parseInt(n.slice(4, 6), 16) / 255,
-  };
-}
 function scaleToPct(s) { return Math.pow(2, s) * 100; }
 function pctToScale(p) { return Math.log2(Math.max(1, Number(p)) / 100); }
 
 function shapeName(id) {
   const s = state.shapes.find((x) => x.id === id);
   return s ? s.name : `Shape ${id}`;
+}
+
+function addRecentColor(hex) {
+  const norm = hex.toLowerCase();
+  if (PRESET_SWATCHES.includes(norm)) return;
+  state.recentColors = [norm, ...state.recentColors.filter((c) => c !== norm)].slice(0, 8);
+  renderRecentSwatches();
 }
 
 function markDirty(opts) {
@@ -76,7 +86,11 @@ function markDirty(opts) {
   }
   renderInspector();
   setStatus();
-  drawCanvas();
+  redraw();
+}
+
+function redraw() {
+  drawCanvas($("emblemCanvas"), state, atlas);
 }
 
 function updateSelectedSwatch() {
@@ -90,7 +104,11 @@ function updateSelectedSwatch() {
 
 function setStatus() {
   const bits = [];
-  bits.push(state.group ? `Saved ${state.group}` : "Unsaved");
+  if (isDemoMode()) {
+    bits.push("Static Demo");
+  } else {
+    bits.push(state.group ? `Saved ${state.group}` : "Unsaved");
+  }
   if (state.dirty) bits.push("unsaved changes");
   bits.push(`${state.layers.length} / ${MAX_LAYERS} layers`);
   $("statusLine").textContent = bits.join(" · ");
@@ -98,190 +116,27 @@ function setStatus() {
 
 function snapshot() {
   return {
-    layers: state.layers.map((L) => Object.assign({}, L)),
+    layers: state.layers.map((L) => ({ ...L })),
     selected: state.selected,
     label: state.label,
   };
 }
 
 function pushUndo() {
-  history.undo.push(snapshot());
-  if (history.undo.length > 80) history.undo.shift();
-  history.redo.length = 0;
+  history.push(snapshot());
 }
 
 function applySnap(snap) {
-  state.layers = snap.layers.map((L) => Object.assign({}, L));
+  if (!snap) return;
+  state.layers = snap.layers.map((L) => ({ ...L }));
   state.selected = snap.selected;
   state.label = snap.label;
   state.dirty = true;
   renderAll();
 }
 
-function undo() {
-  if (!history.undo.length) return;
-  history.redo.push(snapshot());
-  applySnap(history.undo.pop());
-}
-
-function redo() {
-  if (!history.redo.length) return;
-  history.undo.push(snapshot());
-  applySnap(history.redo.pop());
-}
-
-function clearHistory() {
-  history.undo.length = 0;
-  history.redo.length = 0;
-}
-
-function outlineGlyph(src, radius) {
-  const w = src.width;
-  const h = src.height;
-  const sctx = src.getContext("2d");
-  const img = sctx.getImageData(0, 0, w, h);
-  const a = new Uint8ClampedArray(w * h);
-  for (let i = 0, p = 3; i < a.length; i++, p += 4) a[i] = img.data[p];
-  const r = Math.max(1, radius | 0);
-  const dil = new Uint8ClampedArray(a.length);
-  const ero = new Uint8ClampedArray(a.length);
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let mx = 0;
-      let mn = 255;
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dx = -r; dx <= r; dx++) {
-          const xx = x + dx;
-          const yy = y + dy;
-          if (xx < 0 || yy < 0 || xx >= w || yy >= h) {
-            mn = 0;
-            continue;
-          }
-          const v = a[yy * w + xx];
-          if (v > mx) mx = v;
-          if (v < mn) mn = v;
-        }
-      }
-      dil[y * w + x] = mx;
-      ero[y * w + x] = mn;
-    }
-  }
-  const out = document.createElement("canvas");
-  out.width = w;
-  out.height = h;
-  const octx = out.getContext("2d");
-  const oimg = octx.createImageData(w, h);
-  for (let i = 0, p = 0; i < a.length; i++, p += 4) {
-    oimg.data[p] = img.data[p];
-    oimg.data[p + 1] = img.data[p + 1];
-    oimg.data[p + 2] = img.data[p + 2];
-    oimg.data[p + 3] = Math.max(0, dil[i] - ero[i]);
-  }
-  octx.putImageData(oimg, 0, 0);
-  return out;
-}
-
-function atlasTile(shapeId) {
-  return atlas && atlas.tiles[String(shapeId)];
-}
-
-function tintedGlyph(L) {
-  const tile = atlasTile(L.shape);
-  if (!atlas || !tile) return null;
-  const key = `${L.shape}|${Math.round(L.r * 255)}|${Math.round(L.g * 255)}|${Math.round(L.b * 255)}|${L.outlined ? 1 : 0}`;
-  if (tintCache.has(key)) return tintCache.get(key);
-  const src = document.createElement("canvas");
-  src.width = atlas.cell;
-  src.height = atlas.cell;
-  const sctx = src.getContext("2d");
-  sctx.drawImage(atlas.img, tile.x, tile.y, atlas.cell, atlas.cell, 0, 0, atlas.cell, atlas.cell);
-  sctx.globalCompositeOperation = "multiply";
-  sctx.fillStyle = `rgb(${Math.round(L.r * 255)},${Math.round(L.g * 255)},${Math.round(L.b * 255)})`;
-  sctx.fillRect(0, 0, src.width, src.height);
-  sctx.globalCompositeOperation = "destination-in";
-  sctx.drawImage(atlas.img, tile.x, tile.y, atlas.cell, atlas.cell, 0, 0, atlas.cell, atlas.cell);
-  const glyph = L.outlined ? outlineGlyph(src, 2) : src;
-  if (tintCache.size > 160) tintCache.clear();
-  tintCache.set(key, glyph);
-  return glyph;
-}
-
-function glyphAlpha(shapeId, u, v) {
-  const tile = atlasTile(shapeId);
-  if (!atlas || !tile) return 255;
-  const cell = atlas.cell;
-  let best = 0;
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const x = Math.min(cell - 1, Math.max(0, Math.floor(u * cell) + dx));
-      const y = Math.min(cell - 1, Math.max(0, Math.floor(v * cell) + dy));
-      const i = ((tile.y + y) * atlas.width + (tile.x + x)) * 4;
-      best = Math.max(best, atlas.pixels[i + 3]);
-    }
-  }
-  return best;
-}
-
-function drawCanvas() {
-  const canvas = $("emblemCanvas");
-  const ctx = canvas.getContext("2d");
-  const size = canvas.width;
-  ctx.clearRect(0, 0, size, size);
-
-  const ordered = [...state.layers].sort((a, b) => a.index - b.index);
-  for (const L of ordered) {
-    const w = Math.max(1, Math.round(Math.pow(2, L.sx) * size));
-    const h = Math.max(1, Math.round(Math.pow(2, L.sy) * size));
-    ctx.save();
-    ctx.translate(size / 2 + L.x * size, size / 2 + L.y * size);
-    ctx.rotate((L.rot * Math.PI) / 180);
-    if (L.flipped) ctx.scale(-1, 1);
-    ctx.globalAlpha = Math.max(0, Math.min(1, L.a));
-    const glyph = tintedGlyph(L);
-    if (glyph) {
-      ctx.drawImage(glyph, -w / 2, -h / 2, w, h);
-    } else {
-      ctx.fillStyle = rgbHex(L);
-      ctx.fillRect(-w / 2, -h / 2, w, h);
-    }
-    ctx.restore();
-  }
-
-  if (state.selected >= 0 && state.layers[state.selected]) {
-    const L = state.layers[state.selected];
-    const w = Math.pow(2, L.sx) * size;
-    const h = Math.pow(2, L.sy) * size;
-    ctx.save();
-    ctx.translate(size / 2 + L.x * size, size / 2 + L.y * size);
-    ctx.rotate((L.rot * Math.PI) / 180);
-    ctx.strokeStyle = "#ff8000";
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 4]);
-    ctx.strokeRect(-w / 2, -h / 2, w, h);
-    ctx.restore();
-  }
-}
-
-async function loadAtlas() {
-  const meta = await getJSON("/api/shapes/atlas.json");
-  const img = new Image();
-  const ready = new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = reject;
-  });
-  img.src = meta.url || "/api/shapes/atlas.png";
-  await ready;
-  const c = document.createElement("canvas");
-  c.width = meta.width;
-  c.height = meta.height;
-  const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0);
-  atlas = {
-    ...meta,
-    img,
-    pixels: ctx.getImageData(0, 0, meta.width, meta.height).data,
-  };
-}
+function undo() { applySnap(history.undo(snapshot())); }
+function redo() { applySnap(history.redo(snapshot())); }
 
 function reindex() {
   state.layers.forEach((L, i) => { L.index = i; });
@@ -303,6 +158,8 @@ function addLayer(shapeId) {
     rot: 0,
     outlined: false,
     flipped: false,
+    hidden: false,
+    locked: false,
   });
   state.selected = state.layers.length - 1;
   markDirty({ layers: true });
@@ -317,9 +174,22 @@ function removeSelected() {
   markDirty({ layers: true });
 }
 
+function exportableLayers() {
+  return state.layers.filter((L) => !L.hidden).map((L, idx) => ({
+    index: idx,
+    shape: L.shape,
+    r: L.r, g: L.g, b: L.b, a: L.a,
+    x: L.x, y: L.y,
+    sx: L.sx, sy: L.sy,
+    rot: L.rot,
+    outlined: !!L.outlined,
+    flipped: !!L.flipped,
+  }));
+}
+
 function payload() {
   return {
-    layers: state.layers,
+    layers: exportableLayers(),
     label: $("emblemName").value.trim() || "Untitled emblem",
     group: state.group,
     slot: state.slot,
@@ -328,7 +198,7 @@ function payload() {
 
 async function saveEmblem(extra) {
   const body = { ...payload(), ...extra };
-  const res = await postJSON("/api/editor/save", body);
+  const res = await saveEmblemRequest(body);
   state.group = res.group;
   state.slot = res.slot;
   state.dirty = false;
@@ -374,7 +244,7 @@ function renderPalette() {
       c.width = 64;
       c.height = 64;
       c.setAttribute("aria-hidden", "true");
-      const t = atlasTile(s.id);
+      const t = atlasTile(atlas, s.id);
       if (t) {
         const ctx = c.getContext("2d");
         ctx.drawImage(atlas.img, t.x, t.y, atlas.cell, atlas.cell, 0, 0, 64, 64);
@@ -402,15 +272,35 @@ function renderLayers() {
   for (const L of frontFirst) {
     const i = state.layers.indexOf(L);
     const li = document.createElement("li");
-    li.className = "layer-item" + (i === state.selected ? " selected" : "");
+    li.className = "layer-item" + (i === state.selected ? " selected" : "") + (L.hidden ? " is-hidden" : "");
     li.draggable = true;
     li.dataset.index = String(i);
     li.innerHTML = `
       <span class="layer-handle" aria-hidden="true">⋮⋮</span>
       <span class="layer-swatch"></span>
-      <span class="layer-name"></span>`;
+      <span class="layer-name"></span>
+      <button class="layer-icon-btn layer-vis" type="button" title="Toggle visibility"></button>
+      <button class="layer-icon-btn layer-lock" type="button" title="Toggle lock"></button>`;
     li.querySelector(".layer-swatch").style.background = rgbHex(L);
     li.querySelector(".layer-name").textContent = shapeName(L.shape) + (L.outlined ? " · outline" : "");
+    const visBtn = li.querySelector(".layer-vis");
+    visBtn.textContent = L.hidden ? "○" : "●";
+    visBtn.classList.toggle("active", !L.hidden);
+    visBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      pushUndo();
+      L.hidden = !L.hidden;
+      markDirty({ layers: true });
+    });
+    const lockBtn = li.querySelector(".layer-lock");
+    lockBtn.textContent = L.locked ? "■" : "□";
+    lockBtn.classList.toggle("active", !!L.locked);
+    lockBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      L.locked = !L.locked;
+      renderLayers();
+      redraw();
+    });
     li.addEventListener("click", () => {
       state.selected = i;
       renderAll();
@@ -434,6 +324,34 @@ function renderLayers() {
     });
     list.appendChild(li);
   }
+}
+
+function renderSwatches(container, colors) {
+  container.innerHTML = "";
+  for (const hex of colors) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch-btn";
+    btn.style.background = hex;
+    btn.title = hex;
+    btn.setAttribute("aria-label", `Color ${hex}`);
+    btn.addEventListener("click", () => {
+      const L = state.layers[state.selected];
+      if (!L) return;
+      pushUndo();
+      Object.assign(L, hexRgb(hex));
+      addRecentColor(hex);
+      markDirty();
+    });
+    container.appendChild(btn);
+  }
+}
+
+function renderRecentSwatches() {
+  const el = $("recentSwatches");
+  if (!el) return;
+  el.hidden = !state.recentColors.length;
+  renderSwatches(el, state.recentColors);
 }
 
 function renderInspector() {
@@ -460,15 +378,19 @@ function renderAll() {
   renderLayers();
   renderInspector();
   setStatus();
-  drawCanvas();
+  redraw();
 }
 
 function bindInspector() {
+  renderSwatches($("swatchStrip"), PRESET_SWATCHES);
   $("propColor").addEventListener("input", () => {
     const L = state.layers[state.selected];
     if (!L) return;
     Object.assign(L, hexRgb($("propColor").value));
     markDirty();
+  });
+  $("propColor").addEventListener("change", () => {
+    addRecentColor($("propColor").value);
   });
   $("propA").addEventListener("input", () => {
     const L = state.layers[state.selected];
@@ -528,65 +450,83 @@ function canvasPos(ev) {
   };
 }
 
-function layerUV(L, x, y) {
-  const w = Math.pow(2, L.sx);
-  const h = Math.pow(2, L.sy);
-  if (w <= 0 || h <= 0) return null;
-  const dx = x - L.x;
-  const dy = y - L.y;
-  const rad = (-L.rot * Math.PI) / 180;
-  const cos = Math.cos(rad);
-  const sin = Math.sin(rad);
-  let rx = dx * cos - dy * sin;
-  let ry = dx * sin + dy * cos;
-  if (L.flipped) rx = -rx;
-  const u = rx / w + 0.5;
-  const v = ry / h + 0.5;
-  if (u < 0 || u > 1 || v < 0 || v > 1) return null;
-  return { u, v };
-}
-
-function hitTest(x, y) {
-  const order = state.layers
-    .map((L, i) => i)
-    .sort((a, b) => (state.layers[b].index - state.layers[a].index) || (b - a));
-  for (const i of order) {
-    const uv = layerUV(state.layers[i], x, y);
-    if (!uv) continue;
-    if (glyphAlpha(state.layers[i].shape, uv.u, uv.v) >= ALPHA_MIN) return i;
-  }
-  return -1;
-}
-
 function bindCanvas() {
   const canvas = $("emblemCanvas");
   canvas.addEventListener("pointerdown", (ev) => {
     canvas.setPointerCapture(ev.pointerId);
     const p = canvasPos(ev);
-    const hit = hitTest(p.x, p.y);
+    const sel = state.layers[state.selected];
+    const handle = hitHandle(sel, p.x, p.y);
+    if (handle) {
+      pushUndo();
+      if (handle.kind === "rotate") {
+        const startAngle = Math.atan2(p.y - sel.y, p.x - sel.x);
+        state.interaction = { mode: "rotate", startAngle, startRot: sel.rot };
+      } else {
+        const startDist = Math.max(0.02, Math.hypot(p.x - sel.x, p.y - sel.y));
+        state.interaction = {
+          mode: "resize",
+          startDist,
+          startSx: sel.sx,
+          startSy: sel.sy,
+        };
+      }
+      return;
+    }
+
+    const hit = hitTest(state.layers, atlas, p.x, p.y);
     state.selected = hit;
     if (hit >= 0) {
       pushUndo();
       const L = state.layers[hit];
-      state.dragging = { dx: p.x - L.x, dy: p.y - L.y };
+      state.interaction = { mode: "move", dx: p.x - L.x, dy: p.y - L.y };
     } else {
-      state.dragging = null;
+      state.interaction = null;
     }
     renderAll();
   });
+
   canvas.addEventListener("pointermove", (ev) => {
-    if (!state.dragging || state.selected < 0) return;
     const p = canvasPos(ev);
+    if (!state.interaction) {
+      const sel = state.layers[state.selected];
+      const h = hitHandle(sel, p.x, p.y);
+      canvas.style.cursor = h ? (h.kind === "rotate" ? "grab" : "nwse-resize") : "default";
+      return;
+    }
     const L = state.layers[state.selected];
-    L.x = p.x - state.dragging.dx;
-    L.y = p.y - state.dragging.dy;
+    if (!L) return;
+
+    if (state.interaction.mode === "move") {
+      const snapped = snapPoint(p.x - state.interaction.dx, p.y - state.interaction.dy, state.snapEnabled && !ev.altKey);
+      L.x = snapped.x;
+      L.y = snapped.y;
+      state.snapGuides = (snapped.snapX !== null || snapped.snapY !== null)
+        ? { x: snapped.snapX, y: snapped.snapY }
+        : null;
+    } else if (state.interaction.mode === "resize") {
+      const dist = Math.max(0.02, Math.hypot(p.x - L.x, p.y - L.y));
+      const deltaLog = Math.log2(dist / state.interaction.startDist);
+      const clampS = (s) => Math.max(-4.32, Math.min(2.0, s));
+      L.sx = clampS(state.interaction.startSx + deltaLog);
+      L.sy = clampS(state.interaction.startSy + deltaLog);
+      renderInspector();
+    } else if (state.interaction.mode === "rotate") {
+      const angle = Math.atan2(p.y - L.y, p.x - L.x);
+      let deg = state.interaction.startRot + ((angle - state.interaction.startAngle) * 180) / Math.PI;
+      if (ev.shiftKey) deg = Math.round(deg / 15) * 15;
+      L.rot = ((deg % 360) + 360) % 360;
+      renderInspector();
+    }
     state.dirty = true;
-    drawCanvas();
+    redraw();
     setStatus();
   });
+
   canvas.addEventListener("pointerup", () => {
-    if (state.dragging) renderAll();
-    state.dragging = null;
+    state.snapGuides = null;
+    if (state.interaction) renderAll();
+    state.interaction = null;
   });
 }
 
@@ -598,7 +538,7 @@ function duplicateSelected() {
   }
   pushUndo();
   const src = state.layers[state.selected];
-  const copy = Object.assign({}, src, { x: src.x + 0.04, y: src.y + 0.04 });
+  const copy = { ...src, x: src.x + 0.04, y: src.y + 0.04 };
   state.layers.splice(state.selected + 1, 0, copy);
   reindex();
   state.selected += 1;
@@ -607,7 +547,7 @@ function duplicateSelected() {
 
 function copySelected() {
   if (state.selected < 0) return;
-  layerClip = Object.assign({}, state.layers[state.selected]);
+  layerClip = { ...state.layers[state.selected] };
 }
 
 function pasteLayer() {
@@ -617,10 +557,7 @@ function pasteLayer() {
     return;
   }
   pushUndo();
-  const copy = Object.assign({}, layerClip, {
-    x: layerClip.x + 0.04,
-    y: layerClip.y + 0.04,
-  });
+  const copy = { ...layerClip, x: layerClip.x + 0.04, y: layerClip.y + 0.04 };
   const at = state.selected < 0 ? state.layers.length : state.selected + 1;
   state.layers.splice(at, 0, copy);
   reindex();
@@ -639,33 +576,13 @@ function bindKeys() {
       else undo();
       return;
     }
-    if (cmd && ev.key.toLowerCase() === "y") {
-      ev.preventDefault();
-      redo();
-      return;
-    }
-    if (cmd && ev.key.toLowerCase() === "d") {
-      ev.preventDefault();
-      duplicateSelected();
-      return;
-    }
-    if (cmd && ev.key.toLowerCase() === "c") {
-      ev.preventDefault();
-      copySelected();
-      return;
-    }
-    if (cmd && ev.key.toLowerCase() === "v") {
-      ev.preventDefault();
-      pasteLayer();
-      return;
-    }
-    if (ev.key === "Delete" || ev.key === "Backspace") {
-      ev.preventDefault();
-      removeSelected();
-      return;
-    }
+    if (cmd && ev.key.toLowerCase() === "y") { ev.preventDefault(); redo(); return; }
+    if (cmd && ev.key.toLowerCase() === "d") { ev.preventDefault(); duplicateSelected(); return; }
+    if (cmd && ev.key.toLowerCase() === "c") { ev.preventDefault(); copySelected(); return; }
+    if (cmd && ev.key.toLowerCase() === "v") { ev.preventDefault(); pasteLayer(); return; }
+    if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); removeSelected(); return; }
     const L = state.layers[state.selected];
-    if (!L) return;
+    if (!L || L.locked) return;
     const step = ev.shiftKey ? 0.05 : 0.01;
     if (ev.key === "ArrowLeft") { pushUndo(); L.x -= step; markDirty(); ev.preventDefault(); }
     if (ev.key === "ArrowRight") { pushUndo(); L.x += step; markDirty(); ev.preventDefault(); }
@@ -684,13 +601,13 @@ function newEmblem() {
   state.group = null;
   state.slot = 0;
   state.dirty = false;
-  clearHistory();
+  history.clear();
   renderAll();
 }
 
 async function openEmblem(group, slot) {
-  const data = await getJSON(`/api/emblems/${encodeURIComponent(group)}/${slot}/layers`);
-  state.layers = data.layers || [];
+  const data = await fetchEmblemLayers(group, slot);
+  state.layers = (data.layers || []).map((L) => ({ hidden: false, locked: false, ...L }));
   reindex();
   state.selected = state.layers.length ? state.layers.length - 1 : -1;
   state.label = data.label || "";
@@ -699,12 +616,12 @@ async function openEmblem(group, slot) {
   state.dirty = false;
   const dlg = $("openDialog");
   if (dlg.open) dlg.close();
-  clearHistory();
+  history.clear();
   renderAll();
 }
 
 async function showOpenDialog() {
-  const emblems = await getJSON("/api/emblems");
+  const emblems = await fetchEmblemList();
   $("openEmpty").style.display = emblems.length ? "none" : "";
   const grid = $("openGrid");
   grid.innerHTML = "";
@@ -712,38 +629,249 @@ async function showOpenDialog() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "open-card";
-    const img = document.createElement("img");
-    img.alt = "";
-    img.src = `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png${e.mtime ? `?v=${e.mtime}` : ""}`;
+    if (!isDemoMode()) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.src = `/api/render/${encodeURIComponent(e.group)}/${e.slot}.png${e.mtime ? `?v=${e.mtime}` : ""}`;
+      btn.appendChild(img);
+    }
     const span = document.createElement("span");
     span.textContent = e.label || (e.source === "editor" ? "Untitled" : "Capture");
-    btn.append(img, span);
+    btn.appendChild(span);
     btn.addEventListener("click", () => openEmblem(e.group, e.slot));
     grid.appendChild(btn);
   }
   $("openDialog").showModal();
 }
 
-async function downloadBin() {
-  const r = await fetch("/api/editor/export", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload()),
-  });
-  if (!r.ok) throw new Error("export failed");
-  const blob = await r.blob();
+function triggerDownload(blob, filename) {
   const a = document.createElement("a");
-  const name = (payload().label || "emblem").replace(/[^\w\- ]+/g, "").trim() || "emblem";
   a.href = URL.createObjectURL(blob);
-  a.download = `${name}.bin`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
 }
 
+function safeFileBase() {
+  return (payload().label || "emblem").replace(/[^\w\- ]+/g, "").trim() || "emblem";
+}
+
+async function downloadBin() {
+  const blob = await exportBinBlob(payload());
+  triggerDownload(blob, `${safeFileBase()}.bin`);
+}
+
+async function downloadPng() {
+  const canvas = $("emblemCanvas");
+  // Render clean frame without selection box for client-side fallback
+  drawCanvas(canvas, state, atlas, { includeOverlay: false });
+  try {
+    const blob = await exportPngBlob(payload(), canvas);
+    triggerDownload(blob, `${safeFileBase()}.png`);
+  } finally {
+    redraw();
+  }
+}
+
+function bindVectorizerModal() {
+  const dlg = $("img2emblemDialog");
+  const openBtn = $("img2emblemBtn");
+  if (!dlg || !openBtn) return;
+
+  const dropzone = $("vecDropzone");
+  const fileInput = $("vecFileInput");
+  const dropLabel = $("vecDropLabel");
+  const origCanvas = $("vecOrigCanvas");
+  const outCanvas = $("vecOutCanvas");
+  const progressFill = $("vecProgressFill");
+  const stats = $("vecStats");
+  const layersSlider = $("vecLayers");
+  const layersVal = $("vecLayersVal");
+  const qualitySel = $("vecQuality");
+  const shapeSetSel = $("vecShapeSet");
+  const fitSel = $("vecFit");
+  const alphaCheck = $("vecAlpha");
+  const runBtn = $("vecRunBtn");
+  const stopBtn = $("vecStopBtn");
+  const applyBtn = $("vecApplyBtn");
+
+  let loadedImg = null;
+  let loadedName = "";
+  let generatedLayers = null;
+  let controller = null;
+
+  function drawOrigPreview() {
+    if (!loadedImg) return;
+    const prepared = prepareTargetPixels(loadedImg, 256, fitSel.value);
+    const octx = origCanvas.getContext("2d");
+    octx.clearRect(0, 0, origCanvas.width, origCanvas.height);
+    octx.drawImage(prepared.canvas, 0, 0, origCanvas.width, origCanvas.height);
+  }
+
+  function renderGeneratedPreview(layers) {
+    drawCanvas(
+      outCanvas,
+      { layers, selected: -1, showGrid: false, snapGuides: null },
+      atlas,
+      { includeOverlay: false }
+    );
+  }
+
+  async function runConversion() {
+    if (!loadedImg || !atlas) return;
+    if (controller) controller.abort();
+    controller = new AbortController();
+    const sig = controller.signal;
+
+    runBtn.disabled = true;
+    stopBtn.disabled = false;
+    applyBtn.disabled = true;
+    progressFill.style.width = "0%";
+    drawOrigPreview();
+
+    const maxLayers = Number(layersSlider.value);
+    const started = performance.now();
+    stats.textContent = "Fitting shapes…";
+
+    try {
+      const result = await vectorizeImage({
+        source: loadedImg,
+        atlas,
+        shapes: state.shapes,
+        maxLayers,
+        shapeSet: shapeSetSel.value,
+        quality: qualitySel.value,
+        fit: fitSel.value,
+        allowAlpha: alphaCheck.checked,
+        signal: sig,
+        onProgress: ({ layerIndex, totalLayers, layers, similarity }) => {
+          generatedLayers = layers;
+          progressFill.style.width = `${Math.round((layerIndex / totalLayers) * 100)}%`;
+          stats.textContent = `Layer ${layerIndex} / ${totalLayers} · ${similarity.toFixed(1)}% match`;
+          renderGeneratedPreview(layers);
+        },
+      });
+      generatedLayers = result;
+      renderGeneratedPreview(result);
+      const elapsed = ((performance.now() - started) / 1000).toFixed(2);
+      const suffix = sig.aborted ? " (stopped early)" : "";
+      stats.textContent = `${result.length} layers in ${elapsed}s${suffix}`;
+      applyBtn.disabled = !result.length;
+    } catch (err) {
+      stats.textContent = err.message || "Conversion failed";
+      console.error(err);
+    } finally {
+      runBtn.disabled = !loadedImg;
+      stopBtn.disabled = true;
+      if (controller && controller.signal === sig) controller = null;
+    }
+  }
+
+  function loadImageFile(file) {
+    if (!file || !file.type.startsWith("image/")) {
+      stats.textContent = "Please choose a valid image file (PNG, JPG, WebP).";
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      loadedImg = img;
+      loadedName = file.name.replace(/\.[^.]+$/, "").trim() || "Converted image";
+      dropLabel.textContent = `Selected: ${file.name} (${img.naturalWidth}×${img.naturalHeight})`;
+      runBtn.disabled = false;
+      drawOrigPreview();
+      runConversion();
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      stats.textContent = "Could not decode that image.";
+    };
+    img.src = url;
+  }
+
+  openBtn.addEventListener("click", () => {
+    dlg.showModal();
+  });
+  $("closeVecBtn").addEventListener("click", () => {
+    if (controller) controller.abort();
+    dlg.close();
+  });
+  dlg.addEventListener("close", () => {
+    if (controller) controller.abort();
+  });
+
+  dropzone.addEventListener("click", () => fileInput.click());
+  dropzone.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      fileInput.click();
+    }
+  });
+  dropzone.addEventListener("dragover", (ev) => {
+    ev.preventDefault();
+    dropzone.classList.add("is-dragover");
+  });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("is-dragover"));
+  dropzone.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    dropzone.classList.remove("is-dragover");
+    const file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+    if (file) loadImageFile(file);
+  });
+  fileInput.addEventListener("change", (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = "";
+    if (file) loadImageFile(file);
+  });
+
+  layersSlider.addEventListener("input", () => {
+    layersVal.textContent = layersSlider.value;
+  });
+  fitSel.addEventListener("change", drawOrigPreview);
+  runBtn.addEventListener("click", runConversion);
+  stopBtn.addEventListener("click", () => {
+    if (controller) controller.abort();
+  });
+  applyBtn.addEventListener("click", () => {
+    if (!generatedLayers || !generatedLayers.length) return;
+    pushUndo();
+    state.layers = generatedLayers.map((L, idx) => ({ ...L, index: idx }));
+    state.selected = state.layers.length - 1;
+    state.group = null;
+    state.slot = 0;
+    if (loadedName) {
+      state.label = loadedName;
+      $("emblemName").value = loadedName;
+    }
+    state.dirty = true;
+    dlg.close();
+    renderAll();
+    $("statusLine").textContent = `Loaded ${state.layers.length} converted layers — tweak or Save`;
+  });
+}
+
 function bindToolbar() {
+  if (isDemoMode()) {
+    const showBtn = $("showBtn");
+    if (showBtn) showBtn.hidden = true;
+    const backLink = $("backLink");
+    if (backLink) {
+      backLink.href = "https://github.com/userchrispo/b02-emblem-editor";
+      backLink.textContent = "← GitHub repo";
+    }
+  }
+  $("gridToggle").addEventListener("change", () => {
+    state.showGrid = $("gridToggle").checked;
+    redraw();
+  });
+  $("snapToggle").addEventListener("change", () => {
+    state.snapEnabled = $("snapToggle").checked;
+  });
   $("newBtn").addEventListener("click", newEmblem);
   $("openBtn").addEventListener("click", showOpenDialog);
   $("closeOpenBtn").addEventListener("click", () => $("openDialog").close());
+  bindVectorizerModal();
   $("saveBtn").addEventListener("click", async () => {
     try {
       await saveEmblem({});
@@ -762,20 +890,16 @@ function bindToolbar() {
     }
   });
   $("downloadBtn").addEventListener("click", () => downloadBin().catch(console.error));
+  $("exportPngBtn").addEventListener("click", () => downloadPng().catch(console.error));
   $("importBtn").addEventListener("click", () => $("importFile").click());
   $("importFile").addEventListener("change", async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     ev.target.value = "";
     if (!file) return;
     const bytes = new Uint8Array(await file.arrayBuffer());
-    let bin = "";
-    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    const label = file.name.replace(/\.bin$/i, "").trim() || "Imported emblem";
     try {
-      const res = await postJSON("/api/emblems/import", {
-        data_base64: btoa(bin),
-        label: file.name.replace(/\.bin$/i, "").trim() || "Imported emblem",
-      });
-      if (!res.ok) throw new Error(res.error || "import failed");
+      const res = await importBinBytes(bytes, label);
       await openEmblem(res.group, res.slot);
     } catch (err) {
       $("statusLine").textContent = err.message || "Could not import that file";
@@ -803,13 +927,15 @@ async function init() {
   bindKeys();
   bindToolbar();
   $("statusLine").textContent = "Loading shapes…";
-  state.shapes = (await Promise.all([
-    getJSON("/api/shapes"),
+  const [shapes, loadedAtlas] = await Promise.all([
+    fetchShapes(),
     loadAtlas().catch((err) => {
       console.error(err);
-      atlas = null;
+      return null;
     }),
-  ]))[0];
+  ]);
+  state.shapes = shapes;
+  atlas = loadedAtlas;
   if (!state.shapes.some((s) => s.category === state.category) && state.shapes[0]) {
     state.category = state.shapes[0].category;
   }
@@ -821,14 +947,19 @@ async function init() {
   if (group != null && slot != null) {
     try {
       await openEmblem(group, slot);
+      return;
     } catch (err) {
       console.error(err);
       $("statusLine").textContent = "Could not open that emblem — starting a new one";
-      renderAll();
     }
-  } else {
-    renderAll();
+  } else if (isDemoMode()) {
+    const list = await fetchEmblemList().catch(() => []);
+    if (list.length) {
+      await openEmblem(list[0].group, list[0].slot);
+      return;
+    }
   }
+  renderAll();
 }
 
 init().catch((err) => {

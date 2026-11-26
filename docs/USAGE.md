@@ -67,7 +67,7 @@ There is **no From image**. Dropping a picture and rebuilding it with 32 shapes 
 
 You can also click **Edit** on any captured emblem to load it into the PC editor. Saving a capture creates a new copy; it doesn't overwrite the original. **Download .bin** exports the same file format the toolkit uses for Show mode.
 
-The live canvas is a working preview. Outlined layers look filled while you edit; the game (and the thumbnail after you save) draws the real outline.
+The live canvas renders outlined layers with a thin edge stroke matching the game and saved thumbnails.
 
 ## Two things to know before you start
 

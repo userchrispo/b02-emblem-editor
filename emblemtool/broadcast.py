@@ -15,11 +15,11 @@ from .storage import group_dir
 
 
 def _data_path():
-    return os.path.join(group_dir(config.ACTIVE_NAME), "selected.bin")
+    return os.path.join(group_dir(config.ACTIVE_NAME, allow_active=True), "selected.bin")
 
 
 def _meta_path():
-    return os.path.join(group_dir(config.ACTIVE_NAME), "selected_meta.json")
+    return os.path.join(group_dir(config.ACTIVE_NAME, allow_active=True), "selected_meta.json")
 
 
 def read_selection():
@@ -33,13 +33,13 @@ def read_selection():
 
 def select_emblem(group, slot):
     """Select one captured emblem to load into your own editor next."""
-    os.makedirs(group_dir(config.ACTIVE_NAME), exist_ok=True)
-    with open(os.path.join(group_dir(group), f"slot_{slot}.bin"), "rb") as f:
+    os.makedirs(group_dir(config.ACTIVE_NAME, allow_active=True), exist_ok=True)
+    with open(os.path.join(group_dir(group), f"slot_{int(slot)}.bin"), "rb") as f:
         data = f.read()
     with open(_data_path(), "wb") as f:
         f.write(data)
     with open(_meta_path(), "w") as f:
-        json.dump({"group": group, "slot": slot}, f)
+        json.dump({"group": group, "slot": int(slot)}, f)
 
 
 def clear_selection():

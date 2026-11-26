@@ -303,9 +303,29 @@ def vectorize_image(
 
     tr, tg, tb = _prepare_target(image, grid, fit=fit)
     n = grid * grid
-    bg_r = sum(tr) / n
-    bg_g = sum(tg) / n
-    bg_b = sum(tb) / n
+    mean_rgb = (sum(tr) / n, sum(tg) / n, sum(tb) / n)
+    # Use inset border ring (2px from edge) so thin scan margins don't skew border fill.
+    inset = min(2, max(0, grid // 16))
+    br = bg = bb = bc = 0.0
+    for y in range(inset, grid - inset):
+        for x in range(inset, grid - inset):
+            if x not in (inset, grid - 1 - inset) and y not in (inset, grid - 1 - inset):
+                continue
+            i = y * grid + x
+            br += tr[i]
+            bg += tg[i]
+            bb += tb[i]
+            bc += 1
+    border_rgb = (br / bc, bg / bc, bb / bc) if bc else mean_rgb
+    bvar = 0.0
+    for y in range(inset, grid - inset):
+        for x in range(inset, grid - inset):
+            if x not in (inset, grid - 1 - inset) and y not in (inset, grid - 1 - inset):
+                continue
+            i = y * grid + x
+            bvar += (tr[i] - border_rgb[0]) ** 2 + (tg[i] - border_rgb[1]) ** 2 + (tb[i] - border_rgb[2]) ** 2
+    bstd = math.sqrt(bvar / (3.0 * bc)) if bc else 999.0
+    bg_r, bg_g, bg_b = border_rgb if bstd < 28.0 else mean_rgb
     cr = [bg_r] * n
     cg = [bg_g] * n
     cb = [bg_b] * n
@@ -327,70 +347,80 @@ def vectorize_image(
     }]
 
     rng = random.Random(seed)
+    core_usable = [sid for sid in SHAPE_SETS["basic"] if sid in masks] or usable
     for li in range(1, total_layers):
         cdf, total, rmse = _error_cdf(tr, tg, tb, cr, cg, cb)
         if rmse < 2.5:
             break
         progress = li / total_layers
-        max_log = 0.0 - progress * 0.65
-        min_log = -2.1 - progress * 0.9
+        max_log = 0.1 - progress * 0.75
+        min_log = -2.2 - progress * 1.1
 
-        best_cand = None
-        best_res = (0.0, 1.0, 1.0, 1.0)
+        top = []
         for _ in range(preset["candidates"]):
             px, py = _sample_pixel(cdf, total, rng, grid)
             sx = rng.uniform(min_log, max_log)
-            sy = _clamp(sx + rng.uniform(-0.55, 0.55), -3.2, 0.25)
+            sy = _clamp(sx + rng.uniform(-0.85, 0.85), -3.4, 0.3)
+            rot = float(rng.choice((0, 90, 180, 270))) if rng.random() < 0.4 else float(rng.randrange(0, 360))
+            shape = rng.choice(core_usable) if rng.random() < 0.45 else rng.choice(usable)
             cand = {
-                "shape": rng.choice(usable),
+                "shape": shape,
                 "x": px,
                 "y": py,
                 "sx": sx,
                 "sy": sy,
-                "rot": float(rng.randrange(0, 360)),
-                "a": rng.uniform(0.55, 0.9) if (allow_alpha and rng.random() < 0.28) else 1.0,
+                "rot": rot,
+                "a": rng.uniform(0.55, 0.9) if (allow_alpha and rng.random() < 0.22) else 1.0,
                 "flipped": rng.random() < 0.25,
             }
-            res = _evaluate_candidate(cand, masks[cand["shape"]], grid, tr, tg, tb, cr, cg, cb)
-            if res and res[0] > best_res[0]:
-                best_cand = cand
-                best_res = res
+            res = _evaluate_candidate(cand, masks[shape], grid, tr, tg, tb, cr, cg, cb)
+            if res and res[0] > 0.0:
+                if len(top) < 2:
+                    top.append((res, cand))
+                    top.sort(key=lambda item: item[0][0], reverse=True)
+                elif res[0] > top[-1][0][0]:
+                    top[-1] = (res, cand)
+                    top.sort(key=lambda item: item[0][0], reverse=True)
 
-        if not best_cand or best_res[0] <= 0.0:
+        if not top:
             break
 
-        steps = preset["hill_steps"]
-        for step in range(steps):
-            scale = 1.0 - 0.78 * (step / steps)
-            nxt = dict(best_cand)
-            mode = rng.randrange(6)
-            if mode == 0:
-                nxt["x"] = _clamp(nxt["x"] + rng.uniform(-0.13, 0.13) * scale, -0.58, 0.58)
-                nxt["y"] = _clamp(nxt["y"] + rng.uniform(-0.13, 0.13) * scale, -0.58, 0.58)
-            elif mode == 1:
-                nxt["sx"] = _clamp(nxt["sx"] + rng.uniform(-0.45, 0.45) * scale, -3.3, 0.3)
-                nxt["sy"] = _clamp(nxt["sy"] + rng.uniform(-0.45, 0.45) * scale, -3.3, 0.3)
-            elif mode == 2:
-                d = rng.uniform(-0.35, 0.35) * scale
-                nxt["sx"] = _clamp(nxt["sx"] + d, -3.3, 0.3)
-                nxt["sy"] = _clamp(nxt["sy"] + d, -3.3, 0.3)
-            elif mode == 3:
-                nxt["rot"] = (nxt["rot"] + rng.uniform(-45.0, 45.0) * scale) % 360.0
-            elif mode == 4:
-                nxt["shape"] = rng.choice(usable)
-                if rng.random() < 0.35:
-                    nxt["flipped"] = not nxt["flipped"]
-            else:
-                nxt["x"] = _clamp(nxt["x"] + rng.uniform(-0.06, 0.06) * scale, -0.58, 0.58)
-                nxt["y"] = _clamp(nxt["y"] + rng.uniform(-0.06, 0.06) * scale, -0.58, 0.58)
-                nxt["rot"] = (nxt["rot"] + rng.uniform(-17.5, 17.5) * scale) % 360.0
-                if allow_alpha and rng.random() < 0.4:
-                    nxt["a"] = _clamp(nxt["a"] + rng.uniform(-0.175, 0.175) * scale, 0.25, 1.0)
+        best_res, best_cand = top[0]
+        for idx_t, (t_res, t_cand) in enumerate(top):
+            cur_res, cur_cand = t_res, dict(t_cand)
+            steps = preset["hill_steps"] if idx_t == 0 else max(12, preset["hill_steps"] // 2)
+            for step in range(steps):
+                scale = 1.0 - 0.82 * (step / steps)
+                nxt = dict(cur_cand)
+                mode = rng.randrange(6)
+                if mode == 0:
+                    nxt["x"] = _clamp(nxt["x"] + rng.uniform(-0.14, 0.14) * scale, -0.58, 0.58)
+                    nxt["y"] = _clamp(nxt["y"] + rng.uniform(-0.14, 0.14) * scale, -0.58, 0.58)
+                elif mode == 1:
+                    nxt["sx"] = _clamp(nxt["sx"] + rng.uniform(-0.45, 0.45) * scale, -3.5, 0.35)
+                    nxt["sy"] = _clamp(nxt["sy"] + rng.uniform(-0.45, 0.45) * scale, -3.5, 0.35)
+                elif mode == 2:
+                    d = rng.uniform(-0.35, 0.35) * scale
+                    nxt["sx"] = _clamp(nxt["sx"] + d, -3.5, 0.35)
+                    nxt["sy"] = _clamp(nxt["sy"] + d, -3.5, 0.35)
+                elif mode == 3:
+                    nxt["rot"] = (nxt["rot"] + rng.uniform(-45.0, 45.0) * scale) % 360.0
+                elif mode == 4:
+                    nxt["shape"] = rng.choice(usable)
+                    if rng.random() < 0.35:
+                        nxt["flipped"] = not nxt["flipped"]
+                else:
+                    nxt["x"] = _clamp(nxt["x"] + rng.uniform(-0.05, 0.05) * scale, -0.58, 0.58)
+                    nxt["y"] = _clamp(nxt["y"] + rng.uniform(-0.05, 0.05) * scale, -0.58, 0.58)
+                    nxt["rot"] = (nxt["rot"] + rng.uniform(-12.0, 12.0) * scale) % 360.0
+                    if allow_alpha and rng.random() < 0.4:
+                        nxt["a"] = _clamp(nxt["a"] + rng.uniform(-0.18, 0.18) * scale, 0.25, 1.0)
 
-            res = _evaluate_candidate(nxt, masks[nxt["shape"]], grid, tr, tg, tb, cr, cg, cb)
-            if res and res[0] > best_res[0]:
-                best_cand = nxt
-                best_res = res
+                res = _evaluate_candidate(nxt, masks[nxt["shape"]], grid, tr, tg, tb, cr, cg, cb)
+                if res and res[0] > cur_res[0]:
+                    cur_res, cur_cand = res, nxt
+            if cur_res[0] > best_res[0]:
+                best_res, best_cand = cur_res, cur_cand
 
         committed = {
             "index": len(layers),

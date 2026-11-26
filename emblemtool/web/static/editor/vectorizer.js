@@ -323,17 +323,18 @@ function sampleErrorPixel(cdf, total, rng, grid) {
   };
 }
 
-function randomCandidate(shapeIds, cdf, total, grid, progress, allowAlpha, rng) {
+function randomCandidate(shapeIds, coreIds, cdf, total, grid, progress, allowAlpha, rng) {
   const pt = sampleErrorPixel(cdf, total, rng, grid);
   // Early layers favor larger structural forms; later layers favor finer detail.
-  const maxLog = 0.0 - progress * 0.65;
-  const minLog = -2.1 - progress * 0.9;
+  const maxLog = 0.1 - progress * 0.75;
+  const minLog = -2.2 - progress * 1.1;
   const sx = minLog + rng() * (maxLog - minLog);
-  const aspectJitter = (rng() - 0.5) * 1.1;
-  const sy = clamp(sx + aspectJitter, -3.2, 0.25);
-  const shape = shapeIds[(rng() * shapeIds.length) | 0];
-  const rot = Math.round(rng() * 360);
-  const a = allowAlpha && rng() < 0.28 ? 0.55 + rng() * 0.35 : 1.0;
+  const aspectJitter = (rng() - 0.5) * 1.7;
+  const sy = clamp(sx + aspectJitter, -3.4, 0.3);
+  const pool = rng() < 0.45 ? coreIds : shapeIds;
+  const shape = pool[(rng() * pool.length) | 0];
+  const rot = rng() < 0.4 ? [0, 90, 180, 270][(rng() * 4) | 0] : Math.round(rng() * 360);
+  const a = allowAlpha && rng() < 0.22 ? 0.55 + rng() * 0.35 : 1.0;
   const flipped = rng() < 0.25;
   return { shape, x: pt.x, y: pt.y, sx, sy, rot, a, flipped };
 }
@@ -404,16 +405,41 @@ export async function vectorizeImage({
   const target = prepareTargetPixels(source, grid, fit);
   const n = grid * grid;
 
-  // Compute optimal Layer 0 background color (mean RGB of target).
+  // Compute Layer 0 background: prefer uniform inset border color when clean, else global mean.
   let sumR = 0, sumG = 0, sumB = 0;
   for (let i = 0; i < n; i++) {
     sumR += target.r[i];
     sumG += target.g[i];
     sumB += target.b[i];
   }
-  const bgR = sumR / n;
-  const bgG = sumG / n;
-  const bgB = sumB / n;
+  const meanR = sumR / n, meanG = sumG / n, meanB = sumB / n;
+  const inset = Math.min(2, Math.max(0, (grid / 16) | 0));
+  let br = 0, bg = 0, bb = 0, bc = 0;
+  for (let y = inset; y < grid - inset; y++) {
+    for (let x = inset; x < grid - inset; x++) {
+      if (x !== inset && x !== grid - 1 - inset && y !== inset && y !== grid - 1 - inset) continue;
+      const i = y * grid + x;
+      br += target.r[i]; bg += target.g[i]; bb += target.b[i]; bc++;
+    }
+  }
+  const borderR = bc ? br / bc : meanR;
+  const borderG = bc ? bg / bc : meanG;
+  const borderB = bc ? bb / bc : meanB;
+  let bvar = 0;
+  for (let y = inset; y < grid - inset; y++) {
+    for (let x = inset; x < grid - inset; x++) {
+      if (x !== inset && x !== grid - 1 - inset && y !== inset && y !== grid - 1 - inset) continue;
+      const i = y * grid + x;
+      bvar += (target.r[i] - borderR) ** 2 + (target.g[i] - borderG) ** 2 + (target.b[i] - borderB) ** 2;
+    }
+  }
+  const bstd = bc ? Math.sqrt(bvar / (3 * bc)) : 999;
+  const bgR = bstd < 28 ? borderR : meanR;
+  const bgG = bstd < 28 ? borderG : meanG;
+  const bgB = bstd < 28 ? borderB : meanB;
+
+  const coreIds = SHAPE_SETS.basic.filter((id) => bank.has(id));
+  const corePool = coreIds.length ? coreIds : usableIds;
 
   const current = {
     r: new Float32Array(n).fill(bgR),
@@ -459,29 +485,44 @@ export async function vectorizeImage({
     if (rmse < 2.5) break;
 
     const progress = li / totalLayers;
-    let bestCand = null;
-    let bestEval = { delta: 0, r: 1, g: 1, b: 1 };
 
-    // 1. Error-weighted random search
+    // 1. Error-weighted random search (keep top 2 candidates for beam refinement)
+    const top = [];
     for (let k = 0; k < preset.candidates; k++) {
-      const cand = randomCandidate(usableIds, cdf, total, grid, progress, allowAlpha, rng);
+      const cand = randomCandidate(usableIds, corePool, cdf, total, grid, progress, allowAlpha, rng);
       const res = evaluateCandidate(cand, bank.get(cand.shape), target, current);
-      if (res && res.delta > bestEval.delta) {
-        bestCand = cand;
-        bestEval = res;
+      if (res && res.delta > 0) {
+        if (top.length < 2) {
+          top.push({ cand, res });
+          top.sort((a, b) => b.res.delta - a.res.delta);
+        } else if (res.delta > top[1].res.delta) {
+          top[1] = { cand, res };
+          top.sort((a, b) => b.res.delta - a.res.delta);
+        }
       }
     }
 
-    if (!bestCand || bestEval.delta <= 0) break;
+    if (!top.length) break;
 
-    // 2. Multi-scale hill-climbing refinement
-    for (let step = 0; step < preset.hillSteps; step++) {
-      const stepScale = 1.0 - 0.78 * (step / preset.hillSteps);
-      const next = mutateCandidate(bestCand, usableIds, stepScale, allowAlpha, rng);
-      const res = evaluateCandidate(next, bank.get(next.shape), target, current);
-      if (res && res.delta > bestEval.delta) {
-        bestCand = next;
-        bestEval = res;
+    // 2. Multi-scale hill-climbing refinement on top 2 candidates
+    let bestCand = top[0].cand;
+    let bestEval = top[0].res;
+    for (let ti = 0; ti < top.length; ti++) {
+      let curCand = { ...top[ti].cand };
+      let curEval = top[ti].res;
+      const steps = ti === 0 ? preset.hillSteps : Math.max(20, (preset.hillSteps / 2) | 0);
+      for (let step = 0; step < steps; step++) {
+        const stepScale = 1.0 - 0.82 * (step / steps);
+        const next = mutateCandidate(curCand, usableIds, stepScale, allowAlpha, rng);
+        const res = evaluateCandidate(next, bank.get(next.shape), target, current);
+        if (res && res.delta > curEval.delta) {
+          curCand = next;
+          curEval = res;
+        }
+      }
+      if (curEval.delta > bestEval.delta) {
+        bestCand = curCand;
+        bestEval = curEval;
       }
     }
 

@@ -20,7 +20,7 @@ import {
   snapPoint,
 } from "./editor/canvas.js";
 import { createHistory } from "./editor/history.js";
-import { prepareTargetPixels, vectorizeImage } from "./editor/vectorizer.js";
+import { prepareTargetPixels, refineExistingLayers, vectorizeImage } from "./editor/vectorizer.js";
 
 const MAX_LAYERS = 32;
 const CAT_LABELS = {
@@ -55,6 +55,8 @@ const state = {
   snapGuides: null,
   interaction: null, // { mode: 'move' | 'resize' | 'rotate', ... }
   recentColors: [],
+  traceImage: null,
+  traceOpacity: 0.3,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -687,22 +689,33 @@ function bindVectorizerModal() {
   const stats = $("vecStats");
   const layersSlider = $("vecLayers");
   const layersVal = $("vecLayersVal");
+  const zoomSlider = $("vecZoom");
+  const zoomVal = $("vecZoomVal");
   const qualitySel = $("vecQuality");
   const shapeSetSel = $("vecShapeSet");
   const fitSel = $("vecFit");
+  const saliencyCheck = $("vecSaliency");
   const alphaCheck = $("vecAlpha");
+  const keepTraceCheck = $("vecKeepTrace");
   const runBtn = $("vecRunBtn");
+  const refineBtn = $("vecRefineBtn");
   const stopBtn = $("vecStopBtn");
   const applyBtn = $("vecApplyBtn");
 
   let loadedImg = null;
   let loadedName = "";
   let generatedLayers = null;
+  let lastPreparedCanvas = null;
   let controller = null;
+
+  function currentCrop() {
+    return { zoom: Number(zoomSlider.value) / 100, panX: 0, panY: 0 };
+  }
 
   function drawOrigPreview() {
     if (!loadedImg) return;
-    const prepared = prepareTargetPixels(loadedImg, 256, fitSel.value);
+    const prepared = prepareTargetPixels(loadedImg, 256, fitSel.value, currentCrop());
+    lastPreparedCanvas = prepared.canvas;
     const octx = origCanvas.getContext("2d");
     octx.clearRect(0, 0, origCanvas.width, origCanvas.height);
     octx.drawImage(prepared.canvas, 0, 0, origCanvas.width, origCanvas.height);
@@ -724,6 +737,7 @@ function bindVectorizerModal() {
     const sig = controller.signal;
 
     runBtn.disabled = true;
+    refineBtn.disabled = true;
     stopBtn.disabled = false;
     applyBtn.disabled = true;
     progressFill.style.width = "0%";
@@ -731,7 +745,7 @@ function bindVectorizerModal() {
 
     const maxLayers = Number(layersSlider.value);
     const started = performance.now();
-    stats.textContent = "Fitting shapes…";
+    stats.textContent = "Phase 1: Fitting shapes…";
 
     try {
       const result = await vectorizeImage({
@@ -742,13 +756,20 @@ function bindVectorizerModal() {
         shapeSet: shapeSetSel.value,
         quality: qualitySel.value,
         fit: fitSel.value,
+        crop: currentCrop(),
+        saliency: saliencyCheck.checked,
         allowAlpha: alphaCheck.checked,
         signal: sig,
-        onProgress: ({ layerIndex, totalLayers, layers, similarity }) => {
-          generatedLayers = layers;
-          progressFill.style.width = `${Math.round((layerIndex / totalLayers) * 100)}%`;
-          stats.textContent = `Layer ${layerIndex} / ${totalLayers} · ${similarity.toFixed(1)}% match`;
-          renderGeneratedPreview(layers);
+        onProgress: (ev) => {
+          generatedLayers = ev.layers;
+          if (ev.phase === "refine") {
+            progressFill.style.width = `${Math.round((ev.passIndex / ev.totalPasses) * 100)}%`;
+            stats.textContent = `Global refine ${ev.passIndex}/${ev.totalPasses} · ${ev.similarity.toFixed(1)}% match`;
+          } else {
+            progressFill.style.width = `${Math.round((ev.layerIndex / ev.totalLayers) * 100)}%`;
+            stats.textContent = `Layer ${ev.layerIndex}/${ev.totalLayers} · ${ev.similarity.toFixed(1)}% match`;
+          }
+          renderGeneratedPreview(ev.layers);
         },
       });
       generatedLayers = result;
@@ -757,11 +778,60 @@ function bindVectorizerModal() {
       const suffix = sig.aborted ? " (stopped early)" : "";
       stats.textContent = `${result.length} layers in ${elapsed}s${suffix}`;
       applyBtn.disabled = !result.length;
+      refineBtn.disabled = !result.length;
     } catch (err) {
       stats.textContent = err.message || "Conversion failed";
       console.error(err);
     } finally {
       runBtn.disabled = !loadedImg;
+      stopBtn.disabled = true;
+      if (controller && controller.signal === sig) controller = null;
+    }
+  }
+
+  async function runExtraRefine() {
+    if (!loadedImg || !atlas || !generatedLayers || !generatedLayers.length) return;
+    if (controller) controller.abort();
+    controller = new AbortController();
+    const sig = controller.signal;
+
+    runBtn.disabled = true;
+    refineBtn.disabled = true;
+    stopBtn.disabled = false;
+    const started = performance.now();
+    stats.textContent = "Running +2 global joint refinement passes…";
+
+    try {
+      const refined = await refineExistingLayers({
+        layers: generatedLayers,
+        source: loadedImg,
+        atlas,
+        shapes: state.shapes,
+        shapeSet: shapeSetSel.value,
+        quality: qualitySel.value,
+        fit: fitSel.value,
+        crop: currentCrop(),
+        saliency: saliencyCheck.checked,
+        allowAlpha: alphaCheck.checked,
+        passes: 2,
+        signal: sig,
+        onProgress: (ev) => {
+          generatedLayers = ev.layers;
+          progressFill.style.width = `${Math.round((ev.passIndex / ev.totalPasses) * 100)}%`;
+          stats.textContent = `Global refine +${ev.passIndex}/${ev.totalPasses} · ${ev.similarity.toFixed(1)}% match`;
+          renderGeneratedPreview(ev.layers);
+        },
+      });
+      generatedLayers = refined;
+      renderGeneratedPreview(refined);
+      const elapsed = ((performance.now() - started) / 1000).toFixed(2);
+      stats.textContent = `Refined ${refined.length} layers (+2 passes in ${elapsed}s)`;
+    } catch (err) {
+      stats.textContent = err.message || "Refinement failed";
+      console.error(err);
+    } finally {
+      runBtn.disabled = !loadedImg;
+      refineBtn.disabled = !generatedLayers || !generatedLayers.length;
       stopBtn.disabled = true;
       if (controller && controller.signal === sig) controller = null;
     }
@@ -828,8 +898,13 @@ function bindVectorizerModal() {
   layersSlider.addEventListener("input", () => {
     layersVal.textContent = layersSlider.value;
   });
+  zoomSlider.addEventListener("input", () => {
+    zoomVal.textContent = `${(Number(zoomSlider.value) / 100).toFixed(1)}×`;
+    drawOrigPreview();
+  });
   fitSel.addEventListener("change", drawOrigPreview);
   runBtn.addEventListener("click", runConversion);
+  refineBtn.addEventListener("click", runExtraRefine);
   stopBtn.addEventListener("click", () => {
     if (controller) controller.abort();
   });
@@ -843,6 +918,11 @@ function bindVectorizerModal() {
     if (loadedName) {
       state.label = loadedName;
       $("emblemName").value = loadedName;
+    }
+    if (keepTraceCheck.checked && lastPreparedCanvas) {
+      state.traceImage = lastPreparedCanvas;
+      state.traceOpacity = Number($("traceOpacity").value) / 100;
+      $("traceWrap").hidden = false;
     }
     state.dirty = true;
     dlg.close();
@@ -867,6 +947,15 @@ function bindToolbar() {
   });
   $("snapToggle").addEventListener("change", () => {
     state.snapEnabled = $("snapToggle").checked;
+  });
+  $("traceOpacity").addEventListener("input", () => {
+    state.traceOpacity = Number($("traceOpacity").value) / 100;
+    redraw();
+  });
+  $("traceClearBtn").addEventListener("click", () => {
+    state.traceImage = null;
+    $("traceWrap").hidden = true;
+    redraw();
   });
   $("newBtn").addEventListener("click", newEmblem);
   $("openBtn").addEventListener("click", showOpenDialog);

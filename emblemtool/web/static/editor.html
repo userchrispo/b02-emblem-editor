@@ -51,6 +51,10 @@
     <div class="stage-controls">
       <label class="stage-toggle"><input id="gridToggle" type="checkbox" checked> Grid</label>
       <label class="stage-toggle"><input id="snapToggle" type="checkbox" checked> Snap</label>
+      <label class="stage-toggle" id="traceWrap" hidden>
+        Trace <input id="traceOpacity" type="range" min="0" max="80" value="30" style="width:76px;accent-color:var(--accent)">
+        <button class="btn btn-ghost btn-small" id="traceClearBtn" type="button" title="Remove trace overlay">×</button>
+      </label>
     </div>
     <div class="stage-frame">
       <canvas id="emblemCanvas" width="512" height="512" tabindex="0" aria-label="Emblem canvas. Drag to move, use corner handles to resize, top handle to rotate."></canvas>
@@ -159,17 +163,21 @@
       <input id="vecLayers" type="range" min="8" max="32" value="32">
     </label>
     <label class="vec-field">
-      <span>Quality</span>
+      <span>Zoom / Crop <em id="vecZoomVal">1.0×</em></span>
+      <input id="vecZoom" type="range" min="100" max="260" value="100">
+    </label>
+    <label class="vec-field">
+      <span>Quality &amp; Global Refinement</span>
       <select id="vecQuality">
-        <option value="fast">Fast (~0.5s)</option>
-        <option value="balanced" selected>Balanced (~1.2s)</option>
-        <option value="high">High (~2.5s)</option>
+        <option value="fast">Fast (1 global pass)</option>
+        <option value="balanced" selected>Balanced (3 global passes)</option>
+        <option value="high">High (5 global passes)</option>
       </select>
     </label>
     <label class="vec-field">
       <span>Shape Set (all unlocked)</span>
       <select id="vecShapeSet">
-        <option value="geometric" selected>Geometric (14 shapes)</option>
+        <option value="geometric" selected>Geometric + Organic (15 shapes)</option>
         <option value="basic">Basic primitives (5 shapes)</option>
         <option value="all_tools">All unlocked tools (61 shapes)</option>
       </select>
@@ -182,19 +190,30 @@
         <option value="stretch">Stretch to square</option>
       </select>
     </label>
-    <label class="check vec-alpha-check">
-      <input id="vecAlpha" type="checkbox" checked>
-      <span>Semi-transparent shading</span>
-    </label>
+    <div class="vec-checks">
+      <label class="check">
+        <input id="vecSaliency" type="checkbox" checked>
+        <span>Edge &amp; color saliency boost</span>
+      </label>
+      <label class="check">
+        <input id="vecAlpha" type="checkbox" checked>
+        <span>Semi-transparent shading</span>
+      </label>
+      <label class="check">
+        <input id="vecKeepTrace" type="checkbox" checked>
+        <span>Keep ghost trace overlay in editor</span>
+      </label>
+    </div>
   </div>
 
   <div class="vec-footer">
     <button class="btn btn-ghost" id="vecStopBtn" type="button" disabled>Stop</button>
+    <button class="btn btn-ghost" id="vecRefineBtn" type="button" disabled>Refine More (+2)</button>
     <button class="btn btn-ghost" id="vecRunBtn" type="button" disabled>Generate</button>
     <button class="btn btn-accent" id="vecApplyBtn" type="button" disabled>Load into Editor</button>
   </div>
 </dialog>
 
-<script type="module" src="/editor.js?v=mod2"></script>
+<script type="module" src="/editor.js?v=mod3"></script>
 </body>
 </html>

@@ -269,6 +269,13 @@ export function drawCanvas(canvas, state, atlas, { includeOverlay = true } = {})
 
   if (!includeOverlay) return;
 
+  if (state.traceImage && state.traceOpacity > 0) {
+    ctx.save();
+    ctx.globalAlpha = state.traceOpacity;
+    ctx.drawImage(state.traceImage, 0, 0, size, size);
+    ctx.restore();
+  }
+
   // Snap guides while dragging
   if (state.snapGuides) {
     ctx.save();

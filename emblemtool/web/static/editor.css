@@ -502,7 +502,8 @@ html, body.editor-page {
   font-size: 12px;
 }
 .vec-field input[type="range"] { padding: 0; border: 0; accent-color: var(--accent); }
-.vec-alpha-check { grid-column: 1 / -1; margin: 2px 0 0; }
+.vec-checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 2px; }
+.vec-checks .check { margin-bottom: 0; }
 .vec-footer {
   display: flex;
   justify-content: flex-end;
